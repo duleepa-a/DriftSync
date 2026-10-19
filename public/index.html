@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tilt Racer — Game Screen</title>
+  <link rel="stylesheet" href="css/host.css" />
+  <!-- Resolve bare "three" import to the locally served module (offline-safe). -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/lib/three.module.js",
+        "three/addons/": "/jsm/",
+        "@dimforge/rapier3d-compat": "/rapier/rapier.mjs"
+      }
+    }
+  </script>
+</head>
+<body>
+  <!-- 3D canvas (filled by three.js) -->
+  <canvas id="scene"></canvas>
+
+  <!-- HUD overlay grid: one cell per active player, positioned over viewports -->
+  <div id="hud"></div>
+
+  <!-- Countdown / message overlay -->
+  <div id="banner" class="hidden"><span id="bannerText"></span></div>
+
+  <!-- Lobby (shown before the race starts) -->
+  <div id="lobby">
+    <div class="lobby-card">
+      <h1>🏎 Tilt&nbsp;Racer</h1>
+      <p class="tagline">Use your phone as the controller. Up to 4 players.</p>
+
+      <div class="join">
+        <div class="qr">
+          <img id="qrImg" alt="Scan to join" />
+          <div class="scan-hint">Scan with your phone camera</div>
+        </div>
+        <div class="join-info">
+          <div class="step"><span class="num">1</span><span class="txt">Connect your phone to the <b>same Wi-Fi</b> as this laptop.</span></div>
+          <div class="step"><span class="num">2</span><span class="txt">Scan the QR code, or open this address:</span></div>
+          <div class="url" id="joinUrl">…</div>
+          <div class="addr-switch">
+            Can't connect? Try another address:
+            <select id="addrSelect"></select>
+          </div>
+          <div class="step"><span class="num">3</span><span class="txt">Enter code: <span class="code" id="joinCode">····</span></span></div>
+        </div>
+      </div>
+
+      <div class="players" id="lobbyPlayers"></div>
+
+      <button id="startBtn" disabled>Waiting for players…</button>
+      <div class="hint">You can start with 1–4 players. Press start when everyone's in.</div>
+    </div>
+  </div>
+
+  <!-- Results screen -->
+  <div id="results" class="hidden">
+    <div class="lobby-card">
+      <h1 id="resultsTitle">🏁 Finish!</h1>
+      <div class="standings" id="standings"></div>
+      <button id="restartBtn">Race again</button>
+    </div>
+  </div>
+
+  <div id="disconnected" class="hidden">
+    <div class="lobby-card"><h1>Connection lost</h1><p>Refresh this page to start a new game.</p></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="js/host.js"></script>
+</body>
+</html>

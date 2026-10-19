@@ -1,0 +1,143 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --p0: #ff4757; /* red */
+  --p1: #1e90ff; /* blue */
+  --p2: #2ed573; /* green */
+  --p3: #ffa502; /* orange */
+}
+
+html, body {
+  width: 100%; height: 100%; overflow: hidden;
+  background: #0b1020;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  color: #fff;
+  user-select: none;
+}
+
+#scene { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+
+/* ---------------- HUD ---------------- */
+#hud { position: fixed; inset: 0; pointer-events: none; }
+
+.hud-cell { position: absolute; overflow: hidden; }
+
+.hud-top {
+  position: absolute; top: 0; left: 0; right: 0;
+  display: flex; align-items: flex-start; justify-content: space-between;
+  padding: 10px 16px; gap: 10px;
+}
+.hud-stat {
+  display: flex; align-items: baseline; gap: 3px;
+  font-family: 'Arial Narrow', 'Segoe UI', sans-serif; font-weight: 900; font-style: italic;
+  text-shadow: 0 2px 6px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.9);
+}
+.hud-stat .lbl { font-size: 15px; letter-spacing: 1px; margin-right: 4px; opacity: 0.95; }
+.hud-stat .num { font-size: 40px; line-height: 0.9; }
+.hud-stat .den { font-size: 22px; opacity: 0.8; }
+
+.hud-driver { flex: 1; text-align: center; max-width: 46%; }
+.hud-name {
+  font-weight: 900; font-style: italic; font-size: 20px; letter-spacing: 1px;
+  text-shadow: 0 2px 6px rgba(0,0,0,0.9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.hud-bar {
+  margin: 4px auto 0; width: 80%; height: 8px; border-radius: 999px;
+  background: rgba(0,0,0,0.5); overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.6);
+}
+.hud-bar i { display: block; height: 100%; width: 0%; transition: width 0.2s linear; }
+
+.hud-speed {
+  position: absolute; right: 14px; bottom: 8px;
+  font-family: 'Arial Narrow', 'Segoe UI', sans-serif; font-style: italic;
+  display: flex; align-items: baseline; gap: 4px;
+  text-shadow: 0 3px 10px rgba(0,0,0,0.9), 0 0 3px rgba(0,0,0,0.85);
+}
+.hud-speed .mph { font-weight: 900; font-size: 64px; line-height: 0.8; }
+.hud-speed .mphlbl { font-weight: 800; font-size: 18px; opacity: 0.9; }
+
+/* ---------------- Banner / countdown ---------------- */
+#banner {
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  pointer-events: none; z-index: 30;
+}
+#banner span {
+  font-size: 18vh; font-weight: 900; color: #fff;
+  text-shadow: 0 6px 30px rgba(0,0,0,0.9);
+  animation: pop 0.5s ease-out;
+}
+@keyframes pop { from { transform: scale(0.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+/* ---------------- Lobby / overlays ---------------- */
+#lobby, #results, #disconnected {
+  position: fixed; inset: 0; z-index: 40;
+  display: flex; align-items: center; justify-content: center;
+  /* translucent so the live 3D track orbits behind the panel */
+  background: radial-gradient(1200px 800px at 50% -10%, rgba(27,42,74,0.82), rgba(7,11,22,0.88) 70%);
+  backdrop-filter: blur(2px);
+}
+.hidden { display: none !important; }
+
+.lobby-card {
+  width: min(920px, 94vw);
+  background: rgba(15, 22, 42, 0.85);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 22px;
+  padding: 34px 40px;
+  box-shadow: 0 30px 80px rgba(0,0,0,0.6);
+  text-align: center;
+}
+.lobby-card h1 { font-size: 44px; margin-bottom: 6px; }
+.tagline { opacity: 0.75; margin-bottom: 26px; }
+
+.join { display: flex; gap: 30px; align-items: center; justify-content: center; flex-wrap: wrap; margin-bottom: 24px; }
+.qr { background: #fff; padding: 14px; border-radius: 16px; }
+.qr img { width: 240px; height: 240px; display: block; image-rendering: pixelated; }
+.scan-hint { color: #0b1020; font-size: 12px; margin-top: 6px; font-weight: 600; }
+.join-info { text-align: left; max-width: 380px; }
+.step { display: flex; align-items: flex-start; gap: 10px; margin: 10px 0; opacity: 0.92; }
+.step .num {
+  flex: none; width: 26px; height: 26px; border-radius: 50%;
+  background: #2b3c63; display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 14px; margin-top: 1px;
+}
+.step .txt { flex: 1; line-height: 1.4; }
+.url { font-family: ui-monospace, monospace; background: #0d1426; padding: 10px 14px;
+  border-radius: 10px; margin: 6px 0 4px; font-size: 16px; word-break: break-all; }
+.code { font-family: ui-monospace, monospace; font-weight: 900; letter-spacing: 6px;
+  font-size: 22px; color: #ffd54a; }
+.addr-switch { font-size: 12px; opacity: 0.6; margin: 2px 0 6px; }
+.addr-switch select { font-family: ui-monospace, monospace; background: #0d1426; color: #fff;
+  border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 3px 6px; margin-left: 4px; }
+
+.players { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 8px 0 24px; }
+.pslot {
+  border: 2px dashed rgba(255,255,255,0.15); border-radius: 14px; padding: 16px 10px;
+  min-height: 96px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; transition: all 0.2s;
+}
+.pslot.filled { border-style: solid; }
+.pslot .dot { width: 26px; height: 26px; border-radius: 50%; }
+.pslot .pname { font-weight: 700; }
+.pslot .pstat { font-size: 12px; opacity: 0.7; }
+.pslot.empty .pname { opacity: 0.4; }
+
+button {
+  font-family: inherit; font-size: 20px; font-weight: 800;
+  padding: 16px 40px; border-radius: 14px; border: none; cursor: pointer;
+  background: linear-gradient(180deg, #ffd54a, #f0a500); color: #2a1a00;
+  transition: transform 0.1s, filter 0.2s;
+}
+button:hover:not(:disabled) { filter: brightness(1.08); }
+button:active:not(:disabled) { transform: translateY(2px); }
+button:disabled { background: #2b3450; color: #7c89a8; cursor: not-allowed; }
+.hint { opacity: 0.55; font-size: 13px; margin-top: 12px; }
+
+/* results */
+.standings { margin: 18px 0 26px; display: flex; flex-direction: column; gap: 10px; }
+.standing { display: flex; align-items: center; gap: 14px; background: rgba(255,255,255,0.05);
+  padding: 12px 18px; border-radius: 12px; font-size: 18px; }
+.standing .rank { font-weight: 900; width: 36px; font-size: 22px; }
+.standing .dot { width: 20px; height: 20px; border-radius: 50%; }
+.standing .sname { font-weight: 700; flex: 1; text-align: left; }
+.standing .stime { opacity: 0.8; font-variant-numeric: tabular-nums; }

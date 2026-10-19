@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#0b1020" />
+  <title>Tilt Racer — Controller</title>
+  <link rel="stylesheet" href="css/controller.css" />
+</head>
+<body>
+  <!-- Join screen -->
+  <section id="join" class="screen">
+    <div class="card">
+      <h1>🏎 Controller</h1>
+      <p>Enter the 4-letter code shown on the game screen.</p>
+      <input id="codeInput" maxlength="4" autocapitalize="characters" autocomplete="off"
+             inputmode="text" placeholder="CODE" />
+      <input id="nameInput" maxlength="10" autocomplete="off" placeholder="Your name (optional)" />
+      <button id="joinBtn">Join game</button>
+      <div id="joinError" class="error"></div>
+    </div>
+  </section>
+
+  <!-- Active controller -->
+  <section id="controller" class="screen hidden">
+    <div id="statusBar">
+      <span id="placeBadge">P1</span>
+      <span id="lapBadge">Lap 1/3</span>
+      <span id="speedBadge">0 km/h</span>
+    </div>
+
+    <div id="drivePad">
+      <button id="leftBtn" class="drive left">◀<small>LEFT</small></button>
+      <button id="brakeBtn" class="drive brake">BRAKE</button>
+      <button id="rightBtn" class="drive right"><small>RIGHT</small>▶</button>
+    </div>
+
+    <div id="autoHint">Auto-accelerating · steer with ◀ ▶ · hold BRAKE to slow / reverse</div>
+  </section>
+
+  <div id="lostBanner" class="banner hidden">Disconnected. <a href="">Rejoin</a></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="js/controller.js"></script>
+</body>
+</html>

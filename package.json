@@ -1,0 +1,18 @@
+{
+  "name": "tilt-racer",
+  "version": "1.0.0",
+  "description": "Local multiplayer browser car game. Laptop is the screen (4-way split), phones are tilt controllers.",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.19.3",
+    "express": "^4.19.2",
+    "qrcode": "^1.5.3",
+    "socket.io": "^4.7.5",
+    "three": "^0.160.0"
+  }
+}
