@@ -1,7 +1,7 @@
 {
   "name": "tilt-racer",
   "version": "1.0.0",
-  "description": "Local multiplayer browser car game. Laptop is the screen (4-way split), phones are tilt controllers.",
+  "description": "Local multiplayer browser racing game with phone button controllers and split-screen rendering.",
   "type": "commonjs",
   "main": "server.js",
   "scripts": {
