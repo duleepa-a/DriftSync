@@ -6,7 +6,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { buildTrack } from './track.js';
-import { createCarMesh, loadCarAssets } from './carmesh.js';
+import { createCarMesh, disposeCarMesh, loadCarAssets } from './carmesh.js';
 import * as audio from './audio.js';
 import { PHYS, updateCar } from './physics.js';
 import { TOTAL_LAPS, advanceGates, rankings as rankPlayers } from './race.js';
@@ -92,16 +92,22 @@ composer.addPass(new OutputPass());
 // real HDRI environment once it loads (realistic lighting + reflections).
 const pmrem = new THREE.PMREMGenerator(renderer);
 const skyEquirect = makeSkyEnv();
-scene.environment = pmrem.fromEquirectangular(skyEquirect).texture;
+let environmentTarget = pmrem.fromEquirectangular(skyEquirect);
+scene.environment = environmentTarget.texture;
 scene.background = skyEquirect;
 
 new RGBELoader().load('/assets/sky_day.hdr', (hdr) => {
   hdr.mapping = THREE.EquirectangularReflectionMapping;
-  scene.environment = pmrem.fromEquirectangular(hdr).texture;
+  const nextEnvironment = pmrem.fromEquirectangular(hdr);
+  scene.environment = nextEnvironment.texture;
   scene.background = scene.environment;
   scene.backgroundBlurriness = 0.0;
+  environmentTarget.dispose();
+  environmentTarget = nextEnvironment;
+  skyEquirect.dispose();
   hdr.dispose();
-});
+  pmrem.dispose();
+}, undefined, () => pmrem.dispose());
 
 G.track = buildTrack(scene);
 
@@ -199,7 +205,7 @@ function addPlayer(p) {
 
 function removePlayer(id) {
   const p = G.players.get(id);
-  if (p && p.mesh) scene.remove(p.mesh);
+  if (p && p.mesh) { scene.remove(p.mesh); disposeCarMesh(p.mesh); }
   audio.stopVoice(id);
   G.players.delete(id);
   if (G.state === 'countdown' || G.state === 'racing') layoutHud();
@@ -346,6 +352,7 @@ function layoutRects(n) {
 
 function renderSplit() {
   const ps = activePlayers();
+  bloomPass.enabled = ps.length <= 2;
   const rects = layoutRects(ps.length);
   const H = window.innerHeight;
 
@@ -374,6 +381,7 @@ function renderSplit() {
 }
 
 function renderOverview(t) {
+  bloomPass.enabled = true;
   const W = window.innerWidth, H = window.innerHeight;
   renderer.setRenderTarget(POST ? sceneTarget : null);
   renderer.setScissorTest(false);
@@ -651,7 +659,7 @@ function backToLobby() {
   audio.silenceAll();
   (G.track.startLights || []).forEach((m) => setLight(m, 'off'));
   for (const p of G.players.values()) {
-    if (p.mesh) { scene.remove(p.mesh); p.mesh = null; }
+    if (p.mesh) { scene.remove(p.mesh); disposeCarMesh(p.mesh); p.mesh = null; }
   }
   resultsEl.classList.add('hidden');
   lobbyEl.classList.remove('hidden');

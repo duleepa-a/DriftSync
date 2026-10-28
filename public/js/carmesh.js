@@ -33,7 +33,7 @@ export function loadCarAssets() {
         resolve(true);
       },
       undefined,
-      (err) => { console.warn('Ferrari model failed to load; using fallback car.', err); resolve(false); }
+      (err) => { draco.dispose(); console.warn('Ferrari model failed to load; using fallback car.', err); resolve(false); }
     );
   });
 }
@@ -46,6 +46,7 @@ export function createCarMesh(colorHex) {
   model.rotation.y = Math.PI; // model faces -Z; turn it to face our forward (+Z)
 
   let brakeMat = null;
+  const ownedMaterials = [];
   model.traverse((o) => {
     if (!o.isMesh || !o.material) return;
     const name = o.material.name;
@@ -56,11 +57,13 @@ export function createCarMesh(colorHex) {
       m.roughness = 0.4;
       m.envMapIntensity = 0.9;
       o.material = m;
+      ownedMaterials.push(m);
     } else if (name === 'Taillight_Glass') {
       const m = o.material.clone();
       m.emissive = new THREE.Color(0xff2200);
       m.emissiveIntensity = 0.4;
       o.material = m;
+      ownedMaterials.push(m);
       brakeMat = m;
     }
   });
@@ -73,7 +76,24 @@ export function createCarMesh(colorHex) {
   wheels.forEach((w) => { w.rotation.order = 'YXZ'; });
   outer.userData.wheels = wheels;
   outer.userData.brakeMat = brakeMat;
+  outer.userData.ownedMaterials = ownedMaterials;
   return outer;
+}
+
+export function disposeCarMesh(car) {
+  if (!car) return;
+  if (car.userData.isFallback) {
+    const resources = new Set();
+    car.traverse((object) => {
+      if (object.geometry) resources.add(object.geometry);
+      if (object.material) {
+        for (const material of Array.isArray(object.material) ? object.material : [object.material]) resources.add(material);
+      }
+    });
+    for (const resource of resources) resource.dispose();
+  } else {
+    for (const material of car.userData.ownedMaterials || []) material.dispose();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -110,5 +130,6 @@ function createFallbackCar(colorHex) {
   }
   car.userData.wheels = wheels;
   car.userData.brakeMat = brakeMat;
+  car.userData.isFallback = true;
   return car;
 }
