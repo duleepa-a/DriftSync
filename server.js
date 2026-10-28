@@ -146,6 +146,14 @@ io.on('connection', (socket) => {
     const name = (payload && payload.name) || '';
     const room = rooms.get(code);
     if (!room) return cb && cb({ ok: false, error: 'Game not found. Check the code.' });
+    const existing = room.players.get(socket.id);
+    if (existing) {
+      return cb && cb({ ok: true, slot: existing.slot, color: existing.color,
+        name: existing.name, started: room.started });
+    }
+    if (socket.data.code && socket.data.code !== code) {
+      return cb && cb({ ok: false, error: 'Already connected to another game. Reload to switch.' });
+    }
     if (room.players.size >= MAX_PLAYERS) return cb && cb({ ok: false, error: 'Game is full (4 players).' });
 
     const used = new Set(roomPlayers(room).map((p) => p.slot));

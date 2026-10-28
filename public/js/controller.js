@@ -29,6 +29,7 @@ const input = { steer: 0, brake: 0 };
 const held = { left: false, right: false, brake: false };
 let joined = false;
 let pendingFullscreen = false;
+let joinPending = false;
 
 // ---------------------------------------------------------------------------
 // Join
@@ -40,24 +41,40 @@ els.joinBtn.addEventListener('click', doJoin);
 els.codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doJoin(); });
 
 function doJoin() {
+  if (joinPending || !socket.connected) {
+    if (!socket.connected) els.joinError.textContent = 'Connecting to game server…';
+    return;
+  }
   const code = els.codeInput.value.trim().toUpperCase();
   const name = els.nameInput.value.trim();
   if (code.length < 4) { els.joinError.textContent = 'Enter the 4-letter code.'; return; }
   els.joinError.textContent = '';
+  joinPending = true;
   els.joinBtn.disabled = true;
   socket.emit('ctrl:join', { code, name }, (res) => {
+    joinPending = false;
     els.joinBtn.disabled = false;
     if (!res || !res.ok) {
+      joined = false;
+      els.controller.classList.add('hidden');
+      els.join.classList.remove('hidden');
       els.joinError.textContent = (res && res.error) || 'Could not join.';
       return;
     }
     joined = true;
+    els.lostBanner.classList.add('hidden');
     document.documentElement.style.setProperty('--mycolor', res.color);
     els.placeBadge.textContent = 'P' + (res.slot + 1);
     socket.emit('ctrl:ready', true);
     showController();
   });
 }
+
+socket.on('connect', () => {
+  // Socket.IO creates a new socket ID after a network interruption. The old
+  // player record and room membership cannot be used by this connection.
+  if (joined) doJoin();
+});
 
 function showController() {
   els.join.classList.add('hidden');
@@ -132,11 +149,18 @@ socket.on('ctrl:feedback', (fb) => {
 socket.on('game:start', () => { pendingFullscreen = true; goFullscreen(); });
 
 socket.on('host:gone', () => { els.lostBanner.classList.remove('hidden'); joined = false; });
-socket.on('disconnect', () => { els.lostBanner.classList.remove('hidden'); });
+socket.on('disconnect', () => {
+  joinPending = false;
+  els.joinBtn.disabled = false;
+  els.lostBanner.classList.remove('hidden');
+});
 
 function goFullscreen() {
   const el = document.documentElement;
-  try { (el.requestFullscreen || el.webkitRequestFullscreen || (() => {})).call(el); } catch (e) {}
+  try {
+    const request = (el.requestFullscreen || el.webkitRequestFullscreen || (() => {})).call(el);
+    if (request && request.catch) request.catch(() => {});
+  } catch (e) {}
   lockLandscape();
 }
 
