@@ -8,29 +8,15 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { buildTrack } from './track.js';
 import { createCarMesh, loadCarAssets } from './carmesh.js';
 import * as audio from './audio.js';
+import { PHYS, updateCar } from './physics.js';
+import { TOTAL_LAPS, advanceGates, rankings as rankPlayers } from './race.js';
 
 /* global io */
 
 // ---------------------------------------------------------------------------
 // Constants & tuning
 // ---------------------------------------------------------------------------
-const TOTAL_LAPS = 3;
-const GATE_RADIUS = 28;
 const MPH = 2.23694; // m/s -> mph
-
-const PHYS = {
-  maxSpeed: 46,       // m/s top speed (~103 mph)
-  accel: 19,          // engine acceleration (auto-throttle)
-  dragK: 0.004,       // aero drag (∝ v²) — gives a natural top speed & accel curve
-  brakeDecel: 55,     // braking
-  reverseAccel: 16,   // reverse acceleration when stopped + braking
-  reverseMax: -12,
-  turnRate: 2.0,      // rad/s at full grip
-  wallScrub: 0.86,    // speed retained when scraping a wall
-  gears: 8,           // F1-style 8-speed (drives RPM/sound)
-  idleRpm: 4000,
-  redline: 15000,
-};
 const COLLIDE_DIST = 3.6;
 
 // ---------------------------------------------------------------------------
@@ -262,115 +248,10 @@ function spawnPlayer(p) {
 }
 
 // ---------------------------------------------------------------------------
-// Physics
+// Race state and collision feedback
 // ---------------------------------------------------------------------------
-function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-const _aheadV = new THREE.Vector3();
-
-function updateCar(p, dt) {
-  const inp = p.input;
-  p.steerSmooth += (clamp(inp.steer, -1, 1) - p.steerSmooth) * Math.min(1, dt * 12);
-  const steer = p.steerSmooth;
-  const brake = clamp(inp.brake || 0, 0, 1);
-
-  // --- Longitudinal: auto-throttle vs aero drag (∝ v²), or braking ---
-  if (brake > 0.02) {
-    if (p.speed > 0.2) p.speed -= PHYS.brakeDecel * brake * dt;
-    else p.speed -= PHYS.reverseAccel * brake * dt; // reverse from a stop
-  } else {
-    const drag = PHYS.dragK * p.speed * Math.abs(p.speed);
-    p.speed += (PHYS.accel - drag) * dt;
-  }
-  if (p.speed > PHYS.maxSpeed) p.speed -= (p.speed - PHYS.maxSpeed) * 4 * dt;
-  p.speed = clamp(p.speed, PHYS.reverseMax, PHYS.maxSpeed);
-  const sp = Math.abs(p.speed);
-
-  // --- Gearbox / RPM (drives engine sound + feel) ---
-  const gearSpan = PHYS.maxSpeed / PHYS.gears;
-  const gear = Math.min(PHYS.gears - 1, Math.max(0, Math.floor(sp / gearSpan)));
-  const within = clamp((sp - gear * gearSpan) / gearSpan, 0, 1);
-  p.rpm = PHYS.idleRpm + within * (PHYS.redline - PHYS.idleRpm);
-  if (gear > p.gear) p.shiftPulse = 1; // upshift happened this frame
-  p.gear = gear;
-
-  // --- Steering: speed-sensitive, downforce grip, high-speed understeer,
-  //     reduced turn-in when braking hard (lockup) ---
-  const rollingGrip = clamp(sp / 6, 0, 1);                 // need to be moving
-  const understeer = 1 - clamp((sp - 30) / 90, 0, 0.4);    // washes out at top speed
-  const lockAuthority = brake > 0.7 ? 0.6 : 1;             // locked fronts won't turn
-  const dir = p.speed >= 0 ? 1 : -1;
-  p.heading += steer * PHYS.turnRate * rollingGrip * understeer * lockAuthority * dir * dt;
-
-  // --- Integrate position ---
-  const fx = Math.sin(p.heading), fz = Math.cos(p.heading);
-  p.pos.x += fx * p.speed * dt;
-  p.pos.z += fz * p.speed * dt;
-
-  // --- Solid walls ---
-  const info = G.track.nearestInfo(p.pos, p.sampleIndex);
-  p.sampleIndex = info.index;
-  const maxOff = G.track.halfWidth - 1.4;
-  let hitWall = false;
-  if (info.offset > maxOff) { const c = info.offset - maxOff; p.pos.x -= info.nx * c; p.pos.z -= info.nz * c; hitWall = true; }
-  else if (info.offset < -maxOff) { const c = info.offset + maxOff; p.pos.x -= info.nx * c; p.pos.z -= info.nz * c; hitWall = true; }
-  // Scrub speed on impact, not on every frame spent alongside a wall.
-  if (hitWall && !p.offTrack) p.speed *= PHYS.wallScrub;
-  p.offTrack = hitWall;
-
-  // --- Slip / lockup state (for tire squeal, smoke, skid marks) ---
-  const corneringLoad = Math.abs(steer) * sp;
-  const lockup = brake > 0.6 && sp > 12;
-  p.squeal = corneringLoad > 24 || lockup;
-  p.skidding = corneringLoad > 30 || lockup || hitWall;
-
-  // --- Terrain: ride the ground height, pitch with the slope ---
-  const groundY = info.groundY;
-  p.groundY += (groundY - p.groundY) * Math.min(1, dt * 9);
-  const aheadInfo = G.track.nearestInfo(_aheadV.set(p.pos.x + fx * 5, 0, p.pos.z + fz * 5), p.sampleIndex);
-  const slopePitch = -Math.atan2(aheadInfo.groundY - groundY, 5);
-
-  // --- Weight transfer: pitch under accel/brake, roll into corners ---
-  const accelEst = (p.speed - p.prevSpeed) / Math.max(dt, 1e-3);
-  p.prevSpeed = p.speed;
-  const pitch = clamp(slopePitch + clamp(-accelEst * 0.004, -0.05, 0.05), -0.3, 0.3);
-  const bodyRoll = clamp(steer * sp * 0.0016, -0.06, 0.06);
-  p.mesh.position.set(p.pos.x, p.groundY, p.pos.z);
-  p.mesh.rotation.set(pitch, p.heading, -bodyRoll);
-
-  // --- Wheels ---
-  const wheels = p.mesh.userData.wheels || [];
-  const wroll = p.speed * dt * 1.8;
-  for (let i = 0; i < wheels.length; i++) {
-    wheels[i].rotation.x += wroll;
-    if (i < 2) wheels[i].rotation.y = steer * 0.4; // front wheels steer
-  }
-  if (p.mesh.userData.brakeMat) {
-    p.mesh.userData.brakeMat.emissiveIntensity = brake > 0.05 ? 2.6 : 0.4;
-  }
-
-  // --- Skid marks at the rear tyres ---
-  if (p.skidding && wheels.length >= 4) {
-    for (const wi of [2, 3]) { wheels[wi].getWorldPosition(_skidV); dropSkid(_skidV.x, _skidV.z, p.heading, p.groundY); }
-  }
-
-  updateGates(p);
-}
-
 function updateGates(p) {
-  if (p.finished) return;
-  const gates = G.track.gates;
-  const g = p.nextGate % gates.length;
-  const gp = gates[g].pos;
-  const dx = p.pos.x - gp.x;
-  const dz = p.pos.z - gp.z;
-  if (dx * dx + dz * dz < GATE_RADIUS * GATE_RADIUS) {
-    p.gatesPassed++;
-    if (g === 0) {
-      p.lap++;
-      if (p.lap >= TOTAL_LAPS) finishPlayer(p);
-    }
-    p.nextGate = (g + 1) % gates.length;
-  }
+  if (advanceGates(p, G.track.gates)) finishPlayer(p);
 }
 
 function finishPlayer(p) {
@@ -411,24 +292,9 @@ function handleCollisions() {
 // Ranking
 // ---------------------------------------------------------------------------
 function rankings() {
-  const ps = activePlayers();
-  return ps.slice().sort((a, b) => {
-    if (a.finished && b.finished) return a.finishRank - b.finishRank;
-    if (a.finished) return -1;
-    if (b.finished) return 1;
-    if (b.gatesPassed !== a.gatesPassed) return b.gatesPassed - a.gatesPassed;
-    // tie-break: closer to next gate = ahead
-    return distToGate(a) - distToGate(b);
-  });
-}
-function distToGate(p) {
-  const g = G.track.gates[p.nextGate % G.track.gates.length].pos;
-  return Math.hypot(p.pos.x - g.x, p.pos.z - g.z);
+  return rankPlayers(activePlayers(), G.track.gates);
 }
 
-// ---------------------------------------------------------------------------
-// Cameras & rendering
-// ---------------------------------------------------------------------------
 function placeCamera(p, snap = false) {
   const back = 5.6, height = (p.groundY || 0) + 2.5, look = 11;
   const fx = Math.sin(p.heading), fz = Math.cos(p.heading);
@@ -850,7 +716,6 @@ function makeSmokeTexture() {
 // ---------------------------------------------------------------------------
 // Skid marks (one InstancedMesh, recycled ring buffer)
 // ---------------------------------------------------------------------------
-const _skidV = new THREE.Vector3();
 const SKID_MAX = 800;
 const skidMesh = new THREE.InstancedMesh(
   new THREE.PlaneGeometry(0.55, 1.5),
@@ -895,7 +760,7 @@ function loop(now) {
   last = now;
 
   if (G.state === 'racing') {
-    for (const p of G.players.values()) updateCar(p, dt);
+    for (const p of G.players.values()) updateCar(p, dt, G.track, { dropSkid, onGate: updateGates });
     handleCollisions();
     for (const p of G.players.values()) {
       placeCamera(p);
