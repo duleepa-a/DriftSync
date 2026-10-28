@@ -754,14 +754,21 @@ function dropSkid(x, z, heading, y) {
 // ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
+const SIM_STEP = 1 / 60;
+const MAX_FRAME = 0.1;
 let last = performance.now();
+let accumulated = 0;
 function loop(now) {
-  const dt = Math.min(0.05, (now - last) / 1000);
+  const dt = Math.min(MAX_FRAME, Math.max(0, (now - last) / 1000));
   last = now;
 
   if (G.state === 'racing') {
-    for (const p of G.players.values()) updateCar(p, dt, G.track, { dropSkid, onGate: updateGates });
-    handleCollisions();
+    accumulated += dt;
+    while (accumulated >= SIM_STEP) {
+      for (const p of G.players.values()) updateCar(p, SIM_STEP, G.track, { dropSkid, onGate: updateGates });
+      handleCollisions();
+      accumulated -= SIM_STEP;
+    }
     for (const p of G.players.values()) {
       placeCamera(p);
       emitCarSmoke(p);
@@ -773,9 +780,11 @@ function loop(now) {
     sendFeedback(now);
     renderSplit();
   } else if (G.state === 'countdown') {
+    accumulated = 0;
     for (const p of G.players.values()) { placeCamera(p); audio.setEngine(p.id, PHYS.idleRpm, PHYS.redline); }
     renderSplit();
   } else {
+    accumulated = 0;
     renderOverview(now);
   }
 
