@@ -142,39 +142,17 @@ html, body {
 .addr-switch select { max-width: 100%; margin: 6px 0 0; padding: 7px; font: 12px ui-monospace, monospace; cursor: pointer; }
 .players { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 11px; margin: 8px 0 23px; }
 .pslot {
-  position: relative; isolation: isolate; overflow: hidden;
-  min-height: 112px; padding: 12px 6px;
+  min-height: 96px; padding: 12px 6px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
-  border: 1px solid color-mix(in srgb, var(--slot-color) 66%, #26343b); border-radius: 16px;
-  background:
-    radial-gradient(ellipse at 50% 0, color-mix(in srgb, var(--slot-color) 17%, transparent), transparent 70%),
-    repeating-linear-gradient(125deg, rgba(255,255,255,0.016) 0 1px, transparent 1px 4px),
-    linear-gradient(145deg, #14212a, #080f14 75%);
-  box-shadow:
-    inset 0 0 0 4px #081118,
-    inset 0 0 15px color-mix(in srgb, var(--slot-color) 18%, transparent),
-    0 0 13px color-mix(in srgb, var(--slot-color) 25%, transparent),
-    0 9px 16px rgba(0,0,0,0.45);
+  border: 1px solid rgba(113, 193, 224, 0.25); border-radius: 12px;
+  background: linear-gradient(150deg, #14232b, #0a1319);
+  box-shadow: inset 0 0 9px rgba(85, 197, 250, 0.08);
 }
-.pslot::before {
-  content: ''; position: absolute; top: 7px; left: 24%; right: 24%; height: 2px;
-  border-radius: 100%; background: var(--slot-color);
-  box-shadow: 0 0 6px 2px var(--slot-color), 0 0 15px 4px color-mix(in srgb, var(--slot-color) 45%, transparent);
-}
-.pslot::after {
-  content: ''; position: absolute; inset: 6px; pointer-events: none;
-  border: 1px solid color-mix(in srgb, var(--slot-color) 40%, transparent); border-radius: 10px;
-}
-.standing .dot { flex: none; width: 20px; height: 20px; border-radius: 50%; box-shadow: 0 0 10px currentColor; }
-.pslot .pname {
-  max-width: 100%; overflow: hidden; text-overflow: ellipsis;
-  color: var(--race-text); font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase;
-}
-.pslot .pstat {
-  color: var(--slot-color); font-size: 12px; font-weight: 900;
-  letter-spacing: 0.12em; text-transform: uppercase;
-  text-shadow: 0 0 12px color-mix(in srgb, var(--slot-color) 60%, transparent);
-}
+.pslot.filled { border-color: var(--race-cyan); box-shadow: inset 0 0 11px var(--race-cyan-soft), 0 0 10px var(--race-cyan-soft); }
+.pslot .dot, .standing .dot { flex: none; width: 20px; height: 20px; border-radius: 50%; box-shadow: 0 0 10px currentColor; }
+.pslot .pname { max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-weight: 900; letter-spacing: 0.06em; text-transform: uppercase; }
+.pslot .pstat { color: var(--race-muted); font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+.pslot.empty { opacity: 0.55; }
 button { padding: 14px 36px; font-size: 17px; cursor: pointer; }
 .hint { margin-top: 12px; color: var(--race-muted); font-size: 12px; letter-spacing: 0.04em; }
 

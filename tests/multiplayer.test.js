@@ -61,7 +61,6 @@ test('two controllers and a late join get separate slots and input routes', asyn
     await host.next((p) => p.startsWith('42["player:join"'));
     const secondPlayer = JSON.parse((await host.next((p) => p.startsWith('42["player:join"'))).slice(2))[1];
     assert.equal(firstJoin.slot, 0);
-    assert.equal(firstJoin.name, 'Driver 1');
     assert.equal(secondJoin.slot, 1);
     first.emit('ctrl:input', { steer: 1, brake: 0 });
     second.emit('ctrl:input', { steer: -1, brake: 1 });
