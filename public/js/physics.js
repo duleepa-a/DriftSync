@@ -49,6 +49,7 @@ export function updateCar(p, dt, track, { dropSkid, onGate }) {
   p.heading += steer * PHYS.turnRate * rollingGrip * understeer * lockAuthority * dir * dt;
 
   const fx = Math.sin(p.heading), fz = Math.cos(p.heading);
+  const previousX = p.pos.x, previousZ = p.pos.z;
   p.pos.x += fx * p.speed * dt;
   p.pos.z += fz * p.speed * dt;
 
@@ -89,5 +90,5 @@ export function updateCar(p, dt, track, { dropSkid, onGate }) {
   if (p.skidding && wheels.length >= 4) {
     for (const wi of [2, 3]) { wheels[wi].getWorldPosition(skid); dropSkid(skid.x, skid.z, p.heading, p.groundY); }
   }
-  onGate(p);
+  onGate(p, previousX, previousZ);
 }

@@ -102,7 +102,7 @@ export function buildTrack(scene) {
   const gates = [];
   for (let g = 0; g < GATE_COUNT; g++) {
     const idx = Math.round((g / GATE_COUNT) * samples.length) % samples.length;
-    gates.push({ pos: samples[idx].clone(), index: idx });
+    gates.push({ pos: samples[idx].clone(), tangent: tangents[idx].clone(), index: idx });
   }
 
   const startPositions = makeStartGrid(samples, tangents, halfWidth);

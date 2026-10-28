@@ -250,8 +250,8 @@ function spawnPlayer(p) {
 // ---------------------------------------------------------------------------
 // Race state and collision feedback
 // ---------------------------------------------------------------------------
-function updateGates(p) {
-  if (advanceGates(p, G.track.gates)) finishPlayer(p);
+function updateGates(p, previousX, previousZ) {
+  if (advanceGates(p, G.track.gates, previousX, previousZ)) finishPlayer(p);
 }
 
 function finishPlayer(p) {
@@ -262,7 +262,8 @@ function finishPlayer(p) {
   if (!G.winnerId) {
     G.winnerId = p.id;
     showBanner(`${p.name} wins!`, 1600);
-    setTimeout(endRace, 1700);
+    const epoch = raceEpoch;
+    setTimeout(() => { if (epoch === raceEpoch && G.state === 'racing') endRace(); }, 1700);
   }
 }
 
@@ -470,6 +471,7 @@ const socket = io();
 
 socket.on('connect', () => {
   socket.emit('host:create', {}, ({ code, url, port, addresses }) => {
+    document.getElementById('disconnected').classList.add('hidden');
     document.getElementById('joinCode').textContent = code;
     setJoinUrl(url);
 
@@ -484,9 +486,10 @@ socket.on('connect', () => {
       sel.appendChild(opt);
     });
     sel.value = url;
-    sel.addEventListener('change', () => setJoinUrl(sel.value));
   });
 });
+
+document.getElementById('addrSelect').addEventListener('change', (e) => setJoinUrl(e.target.value));
 
 function setJoinUrl(url) {
   document.getElementById('joinUrl').textContent = url;
@@ -574,6 +577,14 @@ document.getElementById('restartBtn').addEventListener('click', () => {
 
 socket.on('game:start', startGame);
 socket.on('game:reset', backToLobby);
+socket.on('disconnect', () => {
+  backToLobby();
+  for (const p of G.players.values()) audio.stopVoice(p.id);
+  G.players.clear();
+  layoutHud();
+  updateLobby();
+  document.getElementById('disconnected').classList.remove('hidden');
+});
 
 function setLight(mat, state) {
   if (!mat) return;
@@ -582,8 +593,10 @@ function setLight(mat, state) {
   else { mat.emissive.setHex(0x330000); mat.emissiveIntensity = 0.25; mat.color.setHex(0x220000); }
 }
 
+let raceEpoch = 0;
 function startGame() {
   if (G.state === 'racing' || G.state === 'countdown') return;
+  const epoch = ++raceEpoch;
   spawnCars();
   layoutHud();
   lobbyEl.classList.add('hidden');
@@ -595,18 +608,18 @@ function startGame() {
   const lights = G.track.startLights || [];
   lights.forEach((m) => setLight(m, 'off'));
   for (let i = 0; i < lights.length; i++) {
-    setTimeout(() => { if (G.state === 'countdown') setLight(lights[i], 'red'); }, 500 + i * 500);
+    setTimeout(() => { if (epoch === raceEpoch && G.state === 'countdown') setLight(lights[i], 'red'); }, 500 + i * 500);
   }
 
   // Discrete 3-2-1-GO countdown banner.
   showBanner('3', 0);
-  setTimeout(() => { if (G.state === 'countdown') showBanner('2', 0); }, 1000);
-  setTimeout(() => { if (G.state === 'countdown') showBanner('1', 0); }, 2000);
+  setTimeout(() => { if (epoch === raceEpoch && G.state === 'countdown') showBanner('2', 0); }, 1000);
+  setTimeout(() => { if (epoch === raceEpoch && G.state === 'countdown') showBanner('1', 0); }, 2000);
   setTimeout(() => {
-    if (G.state !== 'countdown') return;
+    if (epoch !== raceEpoch || G.state !== 'countdown') return;
     showBanner('GO!', 900);
     lights.forEach((m) => setLight(m, 'green'));
-    setTimeout(() => lights.forEach((m) => setLight(m, 'off')), 1200);
+    setTimeout(() => { if (epoch === raceEpoch) lights.forEach((m) => setLight(m, 'off')); }, 1200);
     G.state = 'racing';
     G.raceStart = performance.now();
   }, 3000);
@@ -632,7 +645,9 @@ function endRace() {
 }
 
 function backToLobby() {
+  raceEpoch++;
   G.state = 'lobby';
+  G.winnerId = null;
   audio.silenceAll();
   (G.track.startLights || []).forEach((m) => setLight(m, 'off'));
   for (const p of G.players.values()) {

@@ -1,13 +1,16 @@
 export const TOTAL_LAPS = 3;
 export const GATE_RADIUS = 28;
 
-export function advanceGates(p, gates) {
+export function advanceGates(p, gates, previousX, previousZ) {
   if (p.finished) return false;
   const gate = p.nextGate % gates.length;
-  const gp = gates[gate].pos;
+  const { pos: gp, tangent } = gates[gate];
   const dx = p.pos.x - gp.x;
   const dz = p.pos.z - gp.z;
   if (dx * dx + dz * dz >= GATE_RADIUS * GATE_RADIUS) return false;
+  const before = (previousX - gp.x) * tangent.x + (previousZ - gp.z) * tangent.z;
+  const after = dx * tangent.x + dz * tangent.z;
+  if (before >= 0 || after < 0) return false;
   p.gatesPassed++;
   if (gate === 0) p.lap++;
   p.nextGate = (gate + 1) % gates.length;
