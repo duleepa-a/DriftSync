@@ -6,31 +6,17 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { buildTrack } from './track.js';
-import { createCarMesh, loadCarAssets } from './carmesh.js';
+import { createCarMesh, disposeCarMesh, loadCarAssets } from './carmesh.js';
 import * as audio from './audio.js';
+import { PHYS, updateCar } from './physics.js';
+import { TOTAL_LAPS, advanceGates, rankings as rankPlayers } from './race.js';
 
 /* global io */
 
 // ---------------------------------------------------------------------------
 // Constants & tuning
 // ---------------------------------------------------------------------------
-const TOTAL_LAPS = 3;
-const GATE_RADIUS = 28;
 const MPH = 2.23694; // m/s -> mph
-
-const PHYS = {
-  maxSpeed: 46,       // m/s top speed (~103 mph)
-  accel: 19,          // engine acceleration (auto-throttle)
-  dragK: 0.004,       // aero drag (∝ v²) — gives a natural top speed & accel curve
-  brakeDecel: 55,     // braking
-  reverseAccel: 16,   // reverse acceleration when stopped + braking
-  reverseMax: -12,
-  turnRate: 2.0,      // rad/s at full grip
-  wallScrub: 0.86,    // speed retained when scraping a wall
-  gears: 8,           // F1-style 8-speed (drives RPM/sound)
-  idleRpm: 4000,
-  redline: 15000,
-};
 const COLLIDE_DIST = 3.6;
 
 // ---------------------------------------------------------------------------
@@ -106,16 +92,22 @@ composer.addPass(new OutputPass());
 // real HDRI environment once it loads (realistic lighting + reflections).
 const pmrem = new THREE.PMREMGenerator(renderer);
 const skyEquirect = makeSkyEnv();
-scene.environment = pmrem.fromEquirectangular(skyEquirect).texture;
+let environmentTarget = pmrem.fromEquirectangular(skyEquirect);
+scene.environment = environmentTarget.texture;
 scene.background = skyEquirect;
 
 new RGBELoader().load('/assets/sky_day.hdr', (hdr) => {
   hdr.mapping = THREE.EquirectangularReflectionMapping;
-  scene.environment = pmrem.fromEquirectangular(hdr).texture;
+  const nextEnvironment = pmrem.fromEquirectangular(hdr);
+  scene.environment = nextEnvironment.texture;
   scene.background = scene.environment;
   scene.backgroundBlurriness = 0.0;
+  environmentTarget.dispose();
+  environmentTarget = nextEnvironment;
+  skyEquirect.dispose();
   hdr.dispose();
-});
+  pmrem.dispose();
+}, undefined, () => pmrem.dispose());
 
 G.track = buildTrack(scene);
 
@@ -213,7 +205,7 @@ function addPlayer(p) {
 
 function removePlayer(id) {
   const p = G.players.get(id);
-  if (p && p.mesh) scene.remove(p.mesh);
+  if (p && p.mesh) { scene.remove(p.mesh); disposeCarMesh(p.mesh); }
   audio.stopVoice(id);
   G.players.delete(id);
   if (G.state === 'countdown' || G.state === 'racing') layoutHud();
@@ -262,115 +254,10 @@ function spawnPlayer(p) {
 }
 
 // ---------------------------------------------------------------------------
-// Physics
+// Race state and collision feedback
 // ---------------------------------------------------------------------------
-function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-const _aheadV = new THREE.Vector3();
-
-function updateCar(p, dt) {
-  const inp = p.input;
-  p.steerSmooth += (clamp(inp.steer, -1, 1) - p.steerSmooth) * Math.min(1, dt * 12);
-  const steer = p.steerSmooth;
-  const brake = clamp(inp.brake || 0, 0, 1);
-
-  // --- Longitudinal: auto-throttle vs aero drag (∝ v²), or braking ---
-  if (brake > 0.02) {
-    if (p.speed > 0.2) p.speed -= PHYS.brakeDecel * brake * dt;
-    else p.speed -= PHYS.reverseAccel * brake * dt; // reverse from a stop
-  } else {
-    const drag = PHYS.dragK * p.speed * Math.abs(p.speed);
-    p.speed += (PHYS.accel - drag) * dt;
-  }
-  if (p.speed > PHYS.maxSpeed) p.speed -= (p.speed - PHYS.maxSpeed) * 4 * dt;
-  p.speed = clamp(p.speed, PHYS.reverseMax, PHYS.maxSpeed);
-  const sp = Math.abs(p.speed);
-
-  // --- Gearbox / RPM (drives engine sound + feel) ---
-  const gearSpan = PHYS.maxSpeed / PHYS.gears;
-  const gear = Math.min(PHYS.gears - 1, Math.max(0, Math.floor(sp / gearSpan)));
-  const within = clamp((sp - gear * gearSpan) / gearSpan, 0, 1);
-  p.rpm = PHYS.idleRpm + within * (PHYS.redline - PHYS.idleRpm);
-  if (gear > p.gear) p.shiftPulse = 1; // upshift happened this frame
-  p.gear = gear;
-
-  // --- Steering: speed-sensitive, downforce grip, high-speed understeer,
-  //     reduced turn-in when braking hard (lockup) ---
-  const rollingGrip = clamp(sp / 6, 0, 1);                 // need to be moving
-  const understeer = 1 - clamp((sp - 30) / 90, 0, 0.4);    // washes out at top speed
-  const lockAuthority = brake > 0.7 ? 0.6 : 1;             // locked fronts won't turn
-  const dir = p.speed >= 0 ? 1 : -1;
-  p.heading += steer * PHYS.turnRate * rollingGrip * understeer * lockAuthority * dir * dt;
-
-  // --- Integrate position ---
-  const fx = Math.sin(p.heading), fz = Math.cos(p.heading);
-  p.pos.x += fx * p.speed * dt;
-  p.pos.z += fz * p.speed * dt;
-
-  // --- Solid walls ---
-  const info = G.track.nearestInfo(p.pos, p.sampleIndex);
-  p.sampleIndex = info.index;
-  const maxOff = G.track.halfWidth - 1.4;
-  let hitWall = false;
-  if (info.offset > maxOff) { const c = info.offset - maxOff; p.pos.x -= info.nx * c; p.pos.z -= info.nz * c; hitWall = true; }
-  else if (info.offset < -maxOff) { const c = info.offset + maxOff; p.pos.x -= info.nx * c; p.pos.z -= info.nz * c; hitWall = true; }
-  // Scrub speed on impact, not on every frame spent alongside a wall.
-  if (hitWall && !p.offTrack) p.speed *= PHYS.wallScrub;
-  p.offTrack = hitWall;
-
-  // --- Slip / lockup state (for tire squeal, smoke, skid marks) ---
-  const corneringLoad = Math.abs(steer) * sp;
-  const lockup = brake > 0.6 && sp > 12;
-  p.squeal = corneringLoad > 24 || lockup;
-  p.skidding = corneringLoad > 30 || lockup || hitWall;
-
-  // --- Terrain: ride the ground height, pitch with the slope ---
-  const groundY = info.groundY;
-  p.groundY += (groundY - p.groundY) * Math.min(1, dt * 9);
-  const aheadInfo = G.track.nearestInfo(_aheadV.set(p.pos.x + fx * 5, 0, p.pos.z + fz * 5), p.sampleIndex);
-  const slopePitch = -Math.atan2(aheadInfo.groundY - groundY, 5);
-
-  // --- Weight transfer: pitch under accel/brake, roll into corners ---
-  const accelEst = (p.speed - p.prevSpeed) / Math.max(dt, 1e-3);
-  p.prevSpeed = p.speed;
-  const pitch = clamp(slopePitch + clamp(-accelEst * 0.004, -0.05, 0.05), -0.3, 0.3);
-  const bodyRoll = clamp(steer * sp * 0.0016, -0.06, 0.06);
-  p.mesh.position.set(p.pos.x, p.groundY, p.pos.z);
-  p.mesh.rotation.set(pitch, p.heading, -bodyRoll);
-
-  // --- Wheels ---
-  const wheels = p.mesh.userData.wheels || [];
-  const wroll = p.speed * dt * 1.8;
-  for (let i = 0; i < wheels.length; i++) {
-    wheels[i].rotation.x += wroll;
-    if (i < 2) wheels[i].rotation.y = steer * 0.4; // front wheels steer
-  }
-  if (p.mesh.userData.brakeMat) {
-    p.mesh.userData.brakeMat.emissiveIntensity = brake > 0.05 ? 2.6 : 0.4;
-  }
-
-  // --- Skid marks at the rear tyres ---
-  if (p.skidding && wheels.length >= 4) {
-    for (const wi of [2, 3]) { wheels[wi].getWorldPosition(_skidV); dropSkid(_skidV.x, _skidV.z, p.heading, p.groundY); }
-  }
-
-  updateGates(p);
-}
-
-function updateGates(p) {
-  if (p.finished) return;
-  const gates = G.track.gates;
-  const g = p.nextGate % gates.length;
-  const gp = gates[g].pos;
-  const dx = p.pos.x - gp.x;
-  const dz = p.pos.z - gp.z;
-  if (dx * dx + dz * dz < GATE_RADIUS * GATE_RADIUS) {
-    p.gatesPassed++;
-    if (g === 0) {
-      p.lap++;
-      if (p.lap >= TOTAL_LAPS) finishPlayer(p);
-    }
-    p.nextGate = (g + 1) % gates.length;
-  }
+function updateGates(p, previousX, previousZ) {
+  if (advanceGates(p, G.track.gates, previousX, previousZ)) finishPlayer(p);
 }
 
 function finishPlayer(p) {
@@ -381,7 +268,8 @@ function finishPlayer(p) {
   if (!G.winnerId) {
     G.winnerId = p.id;
     showBanner(`${p.name} wins!`, 1600);
-    setTimeout(endRace, 1700);
+    const epoch = raceEpoch;
+    setTimeout(() => { if (epoch === raceEpoch && G.state === 'racing') endRace(); }, 1700);
   }
 }
 
@@ -411,24 +299,9 @@ function handleCollisions() {
 // Ranking
 // ---------------------------------------------------------------------------
 function rankings() {
-  const ps = activePlayers();
-  return ps.slice().sort((a, b) => {
-    if (a.finished && b.finished) return a.finishRank - b.finishRank;
-    if (a.finished) return -1;
-    if (b.finished) return 1;
-    if (b.gatesPassed !== a.gatesPassed) return b.gatesPassed - a.gatesPassed;
-    // tie-break: closer to next gate = ahead
-    return distToGate(a) - distToGate(b);
-  });
-}
-function distToGate(p) {
-  const g = G.track.gates[p.nextGate % G.track.gates.length].pos;
-  return Math.hypot(p.pos.x - g.x, p.pos.z - g.z);
+  return rankPlayers(activePlayers(), G.track.gates);
 }
 
-// ---------------------------------------------------------------------------
-// Cameras & rendering
-// ---------------------------------------------------------------------------
 function placeCamera(p, snap = false) {
   const back = 5.6, height = (p.groundY || 0) + 2.5, look = 11;
   const fx = Math.sin(p.heading), fz = Math.cos(p.heading);
@@ -479,6 +352,7 @@ function layoutRects(n) {
 
 function renderSplit() {
   const ps = activePlayers();
+  bloomPass.enabled = ps.length <= 2;
   const rects = layoutRects(ps.length);
   const H = window.innerHeight;
 
@@ -507,6 +381,7 @@ function renderSplit() {
 }
 
 function renderOverview(t) {
+  bloomPass.enabled = true;
   const W = window.innerWidth, H = window.innerHeight;
   renderer.setRenderTarget(POST ? sceneTarget : null);
   renderer.setScissorTest(false);
@@ -604,6 +479,7 @@ const socket = io();
 
 socket.on('connect', () => {
   socket.emit('host:create', {}, ({ code, url, port, addresses }) => {
+    document.getElementById('disconnected').classList.add('hidden');
     document.getElementById('joinCode').textContent = code;
     setJoinUrl(url);
 
@@ -618,9 +494,10 @@ socket.on('connect', () => {
       sel.appendChild(opt);
     });
     sel.value = url;
-    sel.addEventListener('change', () => setJoinUrl(sel.value));
   });
 });
+
+document.getElementById('addrSelect').addEventListener('change', (e) => setJoinUrl(e.target.value));
 
 function setJoinUrl(url) {
   document.getElementById('joinUrl').textContent = url;
@@ -655,20 +532,17 @@ function updateLobby() {
   const bySlot = new Map(ps.map((p) => [p.slot, p]));
   let html = '';
   const colors = ['#ff4757', '#1e90ff', '#2ed573', '#ffa502'];
-  const names = ['Red', 'Blue', 'Green', 'Orange'];
+  const names = ['Player 1', 'Player 2', 'Player 3', 'Player 4'];
   for (let s = 0; s < 4; s++) {
     const p = bySlot.get(s);
     if (p) {
       html += `<div class="pslot filled">
-        <div class="dot" style="background:${p.color}"></div>
-        <div class="pname">${escapeHtml(p.name)}</div>
+        <div class="pname" style="color:${colors[s]}">${escapeHtml(p.name)}</div>
         <div class="pstat">${p.ready ? '✓ Ready' : 'Connected'}</div>
       </div>`;
     } else {
       html += `<div class="pslot empty">
-        <div class="dot" style="background:${colors[s]};opacity:.25"></div>
-        <div class="pname">${names[s]}</div>
-        <div class="pstat">waiting…</div>
+        <div class="pstat" style="color:${colors[s]}">waiting…</div>
       </div>`;
     }
   }
@@ -708,6 +582,14 @@ document.getElementById('restartBtn').addEventListener('click', () => {
 
 socket.on('game:start', startGame);
 socket.on('game:reset', backToLobby);
+socket.on('disconnect', () => {
+  backToLobby();
+  for (const p of G.players.values()) audio.stopVoice(p.id);
+  G.players.clear();
+  layoutHud();
+  updateLobby();
+  document.getElementById('disconnected').classList.remove('hidden');
+});
 
 function setLight(mat, state) {
   if (!mat) return;
@@ -716,8 +598,10 @@ function setLight(mat, state) {
   else { mat.emissive.setHex(0x330000); mat.emissiveIntensity = 0.25; mat.color.setHex(0x220000); }
 }
 
+let raceEpoch = 0;
 function startGame() {
   if (G.state === 'racing' || G.state === 'countdown') return;
+  const epoch = ++raceEpoch;
   spawnCars();
   layoutHud();
   lobbyEl.classList.add('hidden');
@@ -729,18 +613,18 @@ function startGame() {
   const lights = G.track.startLights || [];
   lights.forEach((m) => setLight(m, 'off'));
   for (let i = 0; i < lights.length; i++) {
-    setTimeout(() => { if (G.state === 'countdown') setLight(lights[i], 'red'); }, 500 + i * 500);
+    setTimeout(() => { if (epoch === raceEpoch && G.state === 'countdown') setLight(lights[i], 'red'); }, 500 + i * 500);
   }
 
   // Discrete 3-2-1-GO countdown banner.
   showBanner('3', 0);
-  setTimeout(() => { if (G.state === 'countdown') showBanner('2', 0); }, 1000);
-  setTimeout(() => { if (G.state === 'countdown') showBanner('1', 0); }, 2000);
+  setTimeout(() => { if (epoch === raceEpoch && G.state === 'countdown') showBanner('2', 0); }, 1000);
+  setTimeout(() => { if (epoch === raceEpoch && G.state === 'countdown') showBanner('1', 0); }, 2000);
   setTimeout(() => {
-    if (G.state !== 'countdown') return;
+    if (epoch !== raceEpoch || G.state !== 'countdown') return;
     showBanner('GO!', 900);
     lights.forEach((m) => setLight(m, 'green'));
-    setTimeout(() => lights.forEach((m) => setLight(m, 'off')), 1200);
+    setTimeout(() => { if (epoch === raceEpoch) lights.forEach((m) => setLight(m, 'off')); }, 1200);
     G.state = 'racing';
     G.raceStart = performance.now();
   }, 3000);
@@ -750,13 +634,12 @@ function endRace() {
   G.state = 'results';
   audio.silenceAll();
   const ranks = rankings();
-  document.getElementById('resultsTitle').textContent = '🏁 Results';
+  document.getElementById('resultsTitle').textContent = 'Results';
   document.getElementById('standings').innerHTML = ranks.map((p, i) => {
     const place = i + 1;
     const time = p.finished ? formatTime(p.finishTime) : `${p.lap} lap${p.lap === 1 ? '' : 's'}`;
     return `<div class="standing">
       <span class="rank">${['🥇', '🥈', '🥉'][i] || (place + '.')}</span>
-      <span class="dot" style="background:${p.color}"></span>
       <span class="sname">${escapeHtml(p.name)}</span>
       <span class="stime">${time}</span>
     </div>`;
@@ -766,11 +649,13 @@ function endRace() {
 }
 
 function backToLobby() {
+  raceEpoch++;
   G.state = 'lobby';
+  G.winnerId = null;
   audio.silenceAll();
   (G.track.startLights || []).forEach((m) => setLight(m, 'off'));
   for (const p of G.players.values()) {
-    if (p.mesh) { scene.remove(p.mesh); p.mesh = null; }
+    if (p.mesh) { scene.remove(p.mesh); disposeCarMesh(p.mesh); p.mesh = null; }
   }
   resultsEl.classList.add('hidden');
   lobbyEl.classList.remove('hidden');
@@ -850,7 +735,6 @@ function makeSmokeTexture() {
 // ---------------------------------------------------------------------------
 // Skid marks (one InstancedMesh, recycled ring buffer)
 // ---------------------------------------------------------------------------
-const _skidV = new THREE.Vector3();
 const SKID_MAX = 800;
 const skidMesh = new THREE.InstancedMesh(
   new THREE.PlaneGeometry(0.55, 1.5),
@@ -889,14 +773,21 @@ function dropSkid(x, z, heading, y) {
 // ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
+const SIM_STEP = 1 / 60;
+const MAX_FRAME = 0.1;
 let last = performance.now();
+let accumulated = 0;
 function loop(now) {
-  const dt = Math.min(0.05, (now - last) / 1000);
+  const dt = Math.min(MAX_FRAME, Math.max(0, (now - last) / 1000));
   last = now;
 
   if (G.state === 'racing') {
-    for (const p of G.players.values()) updateCar(p, dt);
-    handleCollisions();
+    accumulated += dt;
+    while (accumulated >= SIM_STEP) {
+      for (const p of G.players.values()) updateCar(p, SIM_STEP, G.track, { dropSkid, onGate: updateGates });
+      handleCollisions();
+      accumulated -= SIM_STEP;
+    }
     for (const p of G.players.values()) {
       placeCamera(p);
       emitCarSmoke(p);
@@ -908,9 +799,11 @@ function loop(now) {
     sendFeedback(now);
     renderSplit();
   } else if (G.state === 'countdown') {
+    accumulated = 0;
     for (const p of G.players.values()) { placeCamera(p); audio.setEngine(p.id, PHYS.idleRpm, PHYS.redline); }
     renderSplit();
   } else {
+    accumulated = 0;
     renderOverview(now);
   }
 

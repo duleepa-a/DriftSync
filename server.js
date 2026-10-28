@@ -1,5 +1,5 @@
 /**
- * Tilt Racer - local multiplayer car game server.
+ * Burnout - local multiplayer car game server.
  *
  * Responsibilities:
  *  - Serve the host (game) page and the controller (phone) page.
@@ -115,9 +115,30 @@ function roomPlayers(room) {
   return [...room.players.values()].sort((a, b) => a.slot - b.slot);
 }
 
+function hostRoom(socket) {
+  const room = rooms.get(socket.data.code);
+  return socket.data.role === 'host' && room?.hostId === socket.id ? room : null;
+}
+
+function controllerRoom(socket) {
+  const room = rooms.get(socket.data.code);
+  return socket.data.role === 'ctrl' && room?.players.has(socket.id) ? room : null;
+}
+
+function validInput(input) {
+  if (!input || typeof input !== 'object' ||
+      typeof input.steer !== 'number' || !Number.isFinite(input.steer) ||
+      typeof input.brake !== 'number' || !Number.isFinite(input.brake)) return null;
+  return {
+    steer: Math.max(-1, Math.min(1, input.steer)),
+    brake: Math.max(0, Math.min(1, input.brake)),
+  };
+}
+
 io.on('connection', (socket) => {
   // ---- Host (laptop) creates a room ----
   socket.on('host:create', (_payload, cb) => {
+    if (socket.data.role) return cb?.({ error: 'Already in a game.' });
     const code = makeCode();
     rooms.set(code, { hostId: socket.id, started: false, players: new Map() });
     socket.join(code);
@@ -134,12 +155,13 @@ io.on('connection', (socket) => {
 
   // Host can (re)broadcast a request for current players (e.g. after reload).
   socket.on('host:roster', (_p, cb) => {
-    const room = rooms.get(socket.data.code);
+    const room = hostRoom(socket);
     if (typeof cb === 'function') cb(room ? roomPlayers(room) : []);
   });
 
   // ---- Controller (phone) joins a room ----
   socket.on('ctrl:join', (payload, cb) => {
+    if (socket.data.role === 'host') return cb?.({ ok: false, error: 'Host cannot join as a controller.' });
     const code = String((payload && payload.code) || '').toUpperCase().trim();
     const name = (payload && payload.name) || '';
     const room = rooms.get(code);
@@ -177,34 +199,38 @@ io.on('connection', (socket) => {
 
   // ---- Controller -> Host: input (high frequency) ----
   socket.on('ctrl:input', (input) => {
-    const room = rooms.get(socket.data.code);
-    if (!room) return;
-    io.to(room.hostId).emit('player:input', { id: socket.id, slot: socket.data.slot, input });
+    const room = controllerRoom(socket);
+    const normalized = validInput(input);
+    if (!room || !normalized) return;
+    io.to(room.hostId).emit('player:input', { id: socket.id, slot: socket.data.slot, input: normalized });
   });
 
   // ---- Controller -> Host: ready toggle / name change ----
   socket.on('ctrl:ready', (ready) => {
-    const room = rooms.get(socket.data.code);
+    const room = controllerRoom(socket);
     if (!room) return;
     const p = room.players.get(socket.id);
-    if (p) p.ready = !!ready;
-    io.to(room.hostId).emit('player:ready', { id: socket.id, slot: socket.data.slot, ready: !!ready });
+    p.ready = !!ready;
+    io.to(room.hostId).emit('player:ready', { id: socket.id, slot: p.slot, ready: p.ready });
   });
 
   // ---- Host -> Controller: feedback (vibration, status) ----
-  socket.on('host:feedback', ({ id, ...fb }) => {
-    if (id) io.to(id).emit('ctrl:feedback', fb);
+  socket.on('host:feedback', (payload) => {
+    const room = hostRoom(socket);
+    if (!room || !payload || !room.players.has(payload.id)) return;
+    const { id, ...fb } = payload;
+    io.to(id).emit('ctrl:feedback', fb);
   });
 
   // ---- Host starts / resets the game ----
   socket.on('host:start', () => {
-    const room = rooms.get(socket.data.code);
-    if (!room) return;
+    const room = hostRoom(socket);
+    if (!room || room.players.size === 0 || room.started) return;
     room.started = true;
     io.to(socket.data.code).emit('game:start');
   });
   socket.on('host:reset', () => {
-    const room = rooms.get(socket.data.code);
+    const room = hostRoom(socket);
     if (!room) return;
     room.started = false;
     io.to(socket.data.code).emit('game:reset');
@@ -226,7 +252,7 @@ io.on('connection', (socket) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   const ip = lanIp();
-  console.log('\n  🏎  Tilt Racer is running!\n');
+  console.log('\n  🏎  Burnout is running!\n');
   console.log(`  On this laptop, open:   http://localhost:${PORT}`);
   console.log(`  Phones join via QR, or: http://${ip}:${PORT}/controller.html`);
   console.log('\n  (Phones must be on the same Wi-Fi. Allow Node through the firewall if prompted.)\n');

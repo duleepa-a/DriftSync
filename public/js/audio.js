@@ -106,6 +106,7 @@ export function collision() {
 
 export function silenceAll() {
   if (!ctx) return;
+  
   for (const v of voices.values()) {
     v.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.08);
     v.squealGain.gain.setTargetAtTime(0, ctx.currentTime, 0.08);
@@ -122,4 +123,6 @@ export function setMuted(m) {
   muted = m;
   if (master && ctx) master.gain.setTargetAtTime(m ? 0 : 0.6, ctx.currentTime, 0.05);
 }
-export function toggleMuted() { setMuted(!muted); return muted; }
+export function toggleMuted() { 
+  setMuted(!muted); return muted; 
+}
