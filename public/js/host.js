@@ -553,13 +553,13 @@ function updateLobby() {
 
   if (!G.assetsReady) {
     startBtn.disabled = true;
-    startBtn.textContent = 'Loading 3D car…';
+    startBtn.textContent = 'Loading car…';
   } else if (ps.length === 0) {
     startBtn.disabled = true;
-    startBtn.textContent = 'Waiting for players…';
+    startBtn.textContent = 'Waiting for drivers…';
   } else {
     startBtn.disabled = false;
-    startBtn.textContent = `Start race (${ps.length} player${ps.length > 1 ? 's' : ''})`;
+    startBtn.textContent = `Start race · ${ps.length} driver${ps.length > 1 ? 's' : ''}`;
   }
 }
 updateLobby();
@@ -637,7 +637,7 @@ function endRace() {
   G.state = 'results';
   audio.silenceAll();
   const ranks = rankings();
-  document.getElementById('resultsTitle').textContent = '🏁 Results';
+  document.getElementById('resultsTitle').textContent = 'Results';
   document.getElementById('standings').innerHTML = ranks.map((p, i) => {
     const place = i + 1;
     const time = p.finished ? formatTime(p.finishTime) : `${p.lap} lap${p.lap === 1 ? '' : 's'}`;

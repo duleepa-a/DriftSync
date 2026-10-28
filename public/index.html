@@ -3,8 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tilt Racer — Game Screen</title>
+  <meta name="theme-color" content="#080e13" />
+  <title>Tilt Racer | Race Control</title>
   <link rel="stylesheet" href="css/host.css" />
+  <link rel="stylesheet" href="css/theme.css" />
   <!-- Resolve bare "three" import to the locally served module (offline-safe). -->
   <script type="importmap">
     {
@@ -27,45 +29,47 @@
 
   <!-- Lobby (shown before the race starts) -->
   <div id="lobby">
-    <div class="lobby-card">
-      <h1>🏎 Tilt&nbsp;Racer</h1>
-      <p class="tagline">Use your phone as the controller. Up to 4 players.</p>
+    <div class="lobby-card race-panel">
+      <span class="eyebrow">Race Control</span>
+      <h1>Tilt Racer</h1>
+      <p class="tagline">Local multiplayer · Up to four drivers</p>
 
       <div class="join">
         <div class="qr">
           <img id="qrImg" alt="Scan to join" />
-          <div class="scan-hint">Scan with your phone camera</div>
+          <div class="scan-hint">Scan to join</div>
         </div>
         <div class="join-info">
-          <div class="step"><span class="num">1</span><span class="txt">Connect your phone to the <b>same Wi-Fi</b> as this laptop.</span></div>
-          <div class="step"><span class="num">2</span><span class="txt">Scan the QR code, or open this address:</span></div>
+          <div class="step"><span class="num">01</span><span class="txt">Connect your phone to the <b>same Wi-Fi</b> as this screen.</span></div>
+          <div class="step"><span class="num">02</span><span class="txt">Scan the code or open this address:</span></div>
           <div class="url" id="joinUrl">…</div>
           <div class="addr-switch">
-            Can't connect? Try another address:
+            Connection issue? Choose another address:
             <select id="addrSelect"></select>
           </div>
-          <div class="step"><span class="num">3</span><span class="txt">Enter code: <span class="code" id="joinCode">····</span></span></div>
+          <div class="step"><span class="num">03</span><span class="txt">Room code <span class="code" id="joinCode">····</span></span></div>
         </div>
       </div>
 
       <div class="players" id="lobbyPlayers"></div>
 
-      <button id="startBtn" disabled>Waiting for players…</button>
-      <div class="hint">You can start with 1–4 players. Press start when everyone's in.</div>
+      <button id="startBtn" class="race-action" disabled>Waiting for drivers…</button>
+      <div class="hint">Start with one to four drivers when everyone is ready.</div>
     </div>
   </div>
 
   <!-- Results screen -->
   <div id="results" class="hidden">
-    <div class="lobby-card">
-      <h1 id="resultsTitle">🏁 Finish!</h1>
+    <div class="lobby-card race-panel">
+      <span class="eyebrow">Race Complete</span>
+      <h1 id="resultsTitle">Results</h1>
       <div class="standings" id="standings"></div>
-      <button id="restartBtn">Race again</button>
+      <button id="restartBtn" class="race-action">Race Again</button>
     </div>
   </div>
 
   <div id="disconnected" class="hidden">
-    <div class="lobby-card"><h1>Connection lost</h1><p>Refresh this page to start a new game.</p></div>
+    <div class="lobby-card race-panel"><span class="eyebrow">Signal Lost</span><h1>Reconnecting</h1><p>Waiting for the race server. A new room code will appear when the connection returns.</p></div>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>

@@ -50,7 +50,7 @@ function doJoin() {
   }
   const code = els.codeInput.value.trim().toUpperCase();
   const name = els.nameInput.value.trim();
-  if (code.length < 4) { els.joinError.textContent = 'Enter the 4-letter code.'; return; }
+  if (code.length < 4) { els.joinError.textContent = 'Enter the four-character room code.'; return; }
   els.joinError.textContent = '';
   joinPending = true;
   els.joinBtn.disabled = true;
