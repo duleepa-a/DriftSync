@@ -22,14 +22,17 @@ const els = {
   placeBadge: document.getElementById('placeBadge'),
   lapBadge: document.getElementById('lapBadge'),
   speedBadge: document.getElementById('speedBadge'),
+  fullscreenPrompt: document.getElementById('fullscreenPrompt'),
+  fullscreenMessage: document.getElementById('fullscreenMessage'),
+  fullscreenBtn: document.getElementById('fullscreenBtn'),
   lostBanner: document.getElementById('lostBanner'),
 };
 
 const input = { steer: 0, brake: 0 };
 const held = { left: false, right: false, brake: false };
 let joined = false;
-let pendingFullscreen = false;
 let joinPending = false;
+let fullscreenAttempted = false;
 
 // ---------------------------------------------------------------------------
 // Join
@@ -67,6 +70,7 @@ function doJoin() {
     els.placeBadge.textContent = 'P' + (res.slot + 1);
     socket.emit('ctrl:ready', true);
     showController();
+    if (res.started) showFullscreenPrompt();
   });
 }
 
@@ -83,7 +87,12 @@ function showController() {
 }
 
 function lockLandscape() {
-  try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {}); } catch (e) {}
+  try {
+    if (screen.orientation && screen.orientation.lock) {
+      const result = screen.orientation.lock('landscape');
+      if (result && result.catch) result.catch(() => {});
+    }
+  } catch (e) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -96,7 +105,6 @@ bindButton(els.brakeBtn, 'brake');
 function bindButton(el, key) {
   const down = (e) => {
     e.preventDefault();
-    if (pendingFullscreen) { goFullscreen(); pendingFullscreen = false; }
     held[key] = true; el.classList.add('pressed'); recompute(); buzz(8);
   };
   const up = (e) => { e.preventDefault(); held[key] = false; el.classList.remove('pressed'); recompute(); };
@@ -145,8 +153,10 @@ socket.on('ctrl:feedback', (fb) => {
   if (fb.vibrate && Date.now() - lastBuzz > 220) { buzz(fb.vibrate); lastBuzz = Date.now(); }
 });
 
-// Race started: go fullscreen on the player's next touch (gesture required).
-socket.on('game:start', () => { pendingFullscreen = true; goFullscreen(); });
+// A socket event has no user activation, so browsers reject fullscreen there.
+// Present a button; its tap supplies the required gesture.
+socket.on('game:start', showFullscreenPrompt);
+socket.on('game:reset', () => els.fullscreenPrompt.classList.add('hidden'));
 
 socket.on('host:gone', () => { els.lostBanner.classList.remove('hidden'); joined = false; });
 socket.on('disconnect', () => {
@@ -155,13 +165,37 @@ socket.on('disconnect', () => {
   els.lostBanner.classList.remove('hidden');
 });
 
-function goFullscreen() {
+function showFullscreenPrompt() {
+  fullscreenAttempted = false;
+  const supported = !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
+  els.fullscreenMessage.textContent = supported
+    ? 'The race is starting. Tap to use the full screen.'
+    : 'This browser cannot make the page fullscreen. Add it to your Home Screen for a larger view, or continue playing.';
+  els.fullscreenBtn.textContent = supported ? 'Play fullscreen' : 'Continue playing';
+  els.fullscreenPrompt.classList.remove('hidden');
+}
+
+els.fullscreenBtn.addEventListener('click', async () => {
+  if (fullscreenAttempted) { els.fullscreenPrompt.classList.add('hidden'); return; }
+  const supported = !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
+  if (!supported) { els.fullscreenPrompt.classList.add('hidden'); return; }
+  fullscreenAttempted = true;
+  if (await goFullscreen()) {
+    els.fullscreenPrompt.classList.add('hidden');
+  } else {
+    els.fullscreenMessage.textContent = 'Fullscreen was blocked by this browser. You can still play.';
+    els.fullscreenBtn.textContent = 'Continue playing';
+  }
+});
+
+async function goFullscreen() {
   const el = document.documentElement;
   try {
-    const request = (el.requestFullscreen || el.webkitRequestFullscreen || (() => {})).call(el);
-    if (request && request.catch) request.catch(() => {});
-  } catch (e) {}
-  lockLandscape();
+    const request = (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+    if (request && request.then) await request;
+    lockLandscape();
+    return true;
+  } catch (e) { return false; }
 }
 
 // ---------------------------------------------------------------------------

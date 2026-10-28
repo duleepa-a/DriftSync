@@ -40,8 +40,6 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/lib', express.static(path.join(__dirname, 'node_modules', 'three', 'build')));
 // Addon loaders (GLTFLoader, DRACOLoader, RGBELoader) + the Draco decoder.
 app.use('/jsm', express.static(path.join(__dirname, 'node_modules', 'three', 'examples', 'jsm')));
-// Rapier physics (compat build with inlined WASM).
-app.use('/rapier', express.static(path.join(__dirname, 'node_modules', '@dimforge', 'rapier3d-compat')));
 
 // QR code as a PNG. The host page points this at the controller join URL.
 app.get('/qr', async (req, res) => {

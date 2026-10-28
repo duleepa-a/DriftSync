@@ -8,9 +8,6 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { buildTrack } from './track.js';
 import { createCarMesh, loadCarAssets } from './carmesh.js';
 import * as audio from './audio.js';
-import * as physics from './physics.js';
-
-const MODEL_DROP = 0.7; // visual model origin (wheel-bottom) below chassis centre
 
 /* global io */
 
@@ -23,7 +20,7 @@ const MPH = 2.23694; // m/s -> mph
 
 const PHYS = {
   maxSpeed: 46,       // m/s top speed (~103 mph)
-  accel: 14,          // engine acceleration (auto-throttle)
+  accel: 19,          // engine acceleration (auto-throttle)
   dragK: 0.004,       // aero drag (∝ v²) — gives a natural top speed & accel curve
   brakeDecel: 55,     // braking
   reverseAccel: 16,   // reverse acceleration when stopped + braking
@@ -43,9 +40,6 @@ const G = {
   state: 'lobby', // lobby | countdown | racing | results
   players: new Map(), // socketId -> player
   assetsReady: false, // real car model loaded?
-  physicsReady: false, // Rapier world built?
-  useRapier: false,    // is this race using the physics sim?
-  forceArcade: false,  // user toggled back to arcade
   track: null,
   raceStart: 0,
   countdownEnd: 0,
@@ -127,12 +121,6 @@ G.track = buildTrack(scene);
 
 // Preload the real car model; until it's ready, the Start button waits.
 loadCarAssets().then(() => { G.assetsReady = true; updateLobby(); });
-
-// Bring up the Rapier physics world (real suspension + tyre-slip). If it fails,
-// we silently fall back to the arcade physics.
-physics.initPhysics()
-  .then(() => { physics.buildWorld(G.track.colliders); G.physicsReady = true; })
-  .catch((err) => { console.warn('Rapier init failed; using arcade physics.', err); G.physicsReady = false; });
 
 function makeSkyEnv() {
   const c = document.createElement('canvas');
@@ -227,7 +215,6 @@ function removePlayer(id) {
   const p = G.players.get(id);
   if (p && p.mesh) scene.remove(p.mesh);
   audio.stopVoice(id);
-  if (G.physicsReady) physics.removeCar(id);
   G.players.delete(id);
   if (G.state === 'countdown' || G.state === 'racing') layoutHud();
   updateLobby();
@@ -238,10 +225,6 @@ function activePlayers() {
 }
 
 function spawnCars() {
-  // Decide the physics model for this race.
-  G.useRapier = G.physicsReady && !G.forceArcade;
-  if (G.useRapier) physics.resetCars();
-
   activePlayers().forEach(spawnPlayer);
 }
 
@@ -274,56 +257,8 @@ function spawnPlayer(p) {
   p.mesh.position.set(p.pos.x, p.groundY, p.pos.z);
   p.mesh.rotation.set(0, p.heading, 0);
 
-  if (G.useRapier) physics.addCar(p.id, { pos: g.pos, heading: g.heading });
-
   // Snap camera behind the car immediately.
   placeCamera(p, true);
-}
-
-// Read a car's state back from the Rapier sim into the player object + mesh.
-const _rbQ = new THREE.Quaternion();
-const _rbF = new THREE.Vector3();
-function updateCarRapier(p, dt) {
-  const s = physics.getState(p.id);
-  if (!s) return;
-  p.pos.set(s.x, s.y, s.z);
-  _rbQ.set(s.qx, s.qy, s.qz, s.qw);
-  _rbF.set(0, 0, 1).applyQuaternion(_rbQ);
-  p.heading = Math.atan2(_rbF.x, _rbF.z);
-  p.speed = s.forwardSpeed;
-  p.groundY = s.y - MODEL_DROP;
-  const sp = Math.abs(s.forwardSpeed);
-
-  // gears / RPM for engine sound
-  const gearSpan = PHYS.maxSpeed / PHYS.gears;
-  const gear = Math.min(PHYS.gears - 1, Math.max(0, Math.floor(sp / gearSpan)));
-  const within = clamp((sp - gear * gearSpan) / gearSpan, 0, 1);
-  p.rpm = PHYS.idleRpm + within * (PHYS.redline - PHYS.idleRpm);
-  if (gear > p.gear) p.shiftPulse = 1;
-  p.gear = gear;
-
-  // real lateral slip from the sim drives squeal / smoke / skids
-  const brake = p.input.brake || 0;
-  const slip = Math.abs(s.lateralSpeed);
-  p.squeal = slip > 4.5 || (brake > 0.6 && sp > 12);
-  p.skidding = slip > 6 || p.squeal;
-  p.offTrack = false;
-
-  // place the visual model (wheels at ground)
-  p.mesh.position.set(s.x, s.y - MODEL_DROP, s.z);
-  p.mesh.quaternion.copy(_rbQ);
-
-  // wheels visual
-  p.steerSmooth += ((p.input.steer || 0) - p.steerSmooth) * Math.min(1, dt * 12);
-  const wheels = p.mesh.userData.wheels || [];
-  const wroll = s.forwardSpeed * dt * 1.8;
-  for (let i = 0; i < wheels.length; i++) {
-    wheels[i].rotation.x += wroll;
-    if (i < 2) wheels[i].rotation.y = clamp(p.steerSmooth, -1, 1) * 0.4;
-  }
-  if (p.mesh.userData.brakeMat) p.mesh.userData.brakeMat.emissiveIntensity = brake > 0.05 ? 2.6 : 0.4;
-
-  updateGates(p);
 }
 
 // ---------------------------------------------------------------------------
@@ -378,7 +313,8 @@ function updateCar(p, dt) {
   let hitWall = false;
   if (info.offset > maxOff) { const c = info.offset - maxOff; p.pos.x -= info.nx * c; p.pos.z -= info.nz * c; hitWall = true; }
   else if (info.offset < -maxOff) { const c = info.offset + maxOff; p.pos.x -= info.nx * c; p.pos.z -= info.nz * c; hitWall = true; }
-  if (hitWall) p.speed *= PHYS.wallScrub;
+  // Scrub speed on impact, not on every frame spent alongside a wall.
+  if (hitWall && !p.offTrack) p.speed *= PHYS.wallScrub;
   p.offTrack = hitWall;
 
   // --- Slip / lockup state (for tire squeal, smoke, skid marks) ---
@@ -760,16 +696,10 @@ startBtn.addEventListener('click', () => {
   socket.emit('host:start');
 });
 
-// Mute (M), post-processing (B), physics model (N — applies next race).
+// Mute (M) and post-processing (B).
 window.addEventListener('keydown', (e) => {
   if (e.key === 'm' || e.key === 'M') audio.toggleMuted();
   if (e.key === 'b' || e.key === 'B') POST = !POST;
-  if (e.key === 'n' || e.key === 'N') {
-    G.forceArcade = !G.forceArcade;
-    showBanner(G.forceArcade ? 'Arcade physics' : 'Sim physics', 1400);
-    // If a race is in progress, bail to the lobby so the new mode takes effect.
-    if (G.state === 'racing' || G.state === 'countdown') socket.emit('host:reset');
-  }
 });
 
 document.getElementById('restartBtn').addEventListener('click', () => {
@@ -838,7 +768,6 @@ function endRace() {
 function backToLobby() {
   G.state = 'lobby';
   audio.silenceAll();
-  if (G.physicsReady) physics.resetCars();
   (G.track.startLights || []).forEach((m) => setLight(m, 'off'));
   for (const p of G.players.values()) {
     if (p.mesh) { scene.remove(p.mesh); p.mesh = null; }
@@ -966,14 +895,8 @@ function loop(now) {
   last = now;
 
   if (G.state === 'racing') {
-    if (G.useRapier) {
-      for (const p of G.players.values()) physics.applyControls(p.id, p.input, dt);
-      physics.step(dt);
-      for (const p of G.players.values()) updateCarRapier(p, dt);
-    } else {
-      for (const p of G.players.values()) updateCar(p, dt);
-      handleCollisions();
-    }
+    for (const p of G.players.values()) updateCar(p, dt);
+    handleCollisions();
     for (const p of G.players.values()) {
       placeCamera(p);
       emitCarSmoke(p);
@@ -985,11 +908,6 @@ function loop(now) {
     sendFeedback(now);
     renderSplit();
   } else if (G.state === 'countdown') {
-    if (G.useRapier) {
-      for (const p of G.players.values()) physics.applyControls(p.id, { steer: 0, brake: 0 }, dt, true);
-      physics.step(dt);
-      for (const p of G.players.values()) updateCarRapier(p, dt);
-    }
     for (const p of G.players.values()) { placeCamera(p); audio.setEngine(p.id, PHYS.idleRpm, PHYS.redline); }
     renderSplit();
   } else {

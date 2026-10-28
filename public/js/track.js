@@ -66,25 +66,22 @@ export function buildTrack(scene) {
   }
 
   // ---------- Road, kerbs, walls ----------
-  // Meshes pushed to groundMeshes/wallMeshes are merged into physics colliders.
-  const groundMeshes = [];
-  const wallMeshes = [];
-  groundMeshes.push(buildRibbon(scene, samples, tangents, -halfWidth, halfWidth, 0.01, makeAsphaltMat(), 1 / 7));
+  buildRibbon(scene, samples, tangents, -halfWidth, halfWidth, 0.01, makeAsphaltMat(), 1 / 7);
   buildRibbon(scene, samples, tangents, halfWidth - 1.6, halfWidth, 0.06, makeKerbMat(), 0.5);
   buildRibbon(scene, samples, tangents, -halfWidth, -(halfWidth - 1.6), 0.06, makeKerbMat(), 0.5);
-  wallMeshes.push(buildWall(scene, samples, tangents, halfWidth + 0.3, 3.2));
-  wallMeshes.push(buildWall(scene, samples, tangents, -(halfWidth + 0.3), 3.2));
+  buildWall(scene, samples, tangents, halfWidth + 0.3, 3.2);
+  buildWall(scene, samples, tangents, -(halfWidth + 0.3), 3.2);
 
   // Paved apron, gravel trap, then grass embankment that follows the elevation
   // and slopes down to the ground base.
-  groundMeshes.push(buildRibbon(scene, samples, tangents, halfWidth + 0.3, halfWidth + 9, 0.0, makeRunoffMat(), 1 / 7));
-  groundMeshes.push(buildRibbon(scene, samples, tangents, -(halfWidth + 9), -(halfWidth + 0.3), 0.0, makeRunoffMat(), 1 / 7));
+  buildRibbon(scene, samples, tangents, halfWidth + 0.3, halfWidth + 9, 0.0, makeRunoffMat(), 1 / 7);
+  buildRibbon(scene, samples, tangents, -(halfWidth + 9), -(halfWidth + 0.3), 0.0, makeRunoffMat(), 1 / 7);
   const gravelMat = makeGravelMat();
-  groundMeshes.push(buildRibbon(scene, samples, tangents, halfWidth + 9, halfWidth + 16, 0.0, gravelMat, 1 / 4));
-  groundMeshes.push(buildRibbon(scene, samples, tangents, -(halfWidth + 16), -(halfWidth + 9), 0.0, gravelMat, 1 / 4));
+  buildRibbon(scene, samples, tangents, halfWidth + 9, halfWidth + 16, 0.0, gravelMat, 1 / 4);
+  buildRibbon(scene, samples, tangents, -(halfWidth + 16), -(halfWidth + 9), 0.0, gravelMat, 1 / 4);
   const grassMat = makeGrassMat();
-  groundMeshes.push(buildEmbankment(scene, samples, tangents, halfWidth + 16, halfWidth + 80, groundBase, grassMat));
-  groundMeshes.push(buildEmbankment(scene, samples, tangents, -(halfWidth + 16), -(halfWidth + 80), groundBase, grassMat));
+  buildEmbankment(scene, samples, tangents, halfWidth + 16, halfWidth + 80, groundBase, grassMat);
+  buildEmbankment(scene, samples, tangents, -(halfWidth + 16), -(halfWidth + 80), groundBase, grassMat);
 
   // F1 dressing: catch fencing, start gantry, grid boxes, pit complex.
   buildCatchFence(scene, samples, tangents, halfWidth + 0.4);
@@ -127,33 +124,7 @@ export function buildTrack(scene) {
     return { index: best, dist: Math.sqrt(bestD), offset, nx: n.x, nz: n.z, groundY: samples[best].y };
   }
 
-  const colliders = {
-    ground: mergeColliderGeo(groundMeshes),
-    walls: mergeColliderGeo(wallMeshes),
-    floorY: groundBase - 30,
-  };
-
-  return { samples, tangents, halfWidth, gates, startPositions, nearestInfo, startLights, colliders };
-}
-
-// Merge several baked-in-world-space meshes into one {vertices, indices} set
-// for a Rapier trimesh collider.
-function mergeColliderGeo(meshes) {
-  let vCount = 0, iCount = 0;
-  for (const m of meshes) { vCount += m.geometry.attributes.position.count; iCount += m.geometry.index.count; }
-  const vertices = new Float32Array(vCount * 3);
-  const indices = new Uint32Array(iCount);
-  let vOff = 0, iOff = 0, base = 0;
-  for (const m of meshes) {
-    const pos = m.geometry.attributes.position.array;
-    vertices.set(pos, vOff);
-    const idx = m.geometry.index.array;
-    for (let k = 0; k < idx.length; k++) indices[iOff + k] = idx[k] + base;
-    base += m.geometry.attributes.position.count;
-    vOff += pos.length;
-    iOff += idx.length;
-  }
-  return { vertices, indices };
+  return { samples, tangents, halfWidth, gates, startPositions, nearestInfo, startLights };
 }
 
 // ----------------------------------------------------------------------------
