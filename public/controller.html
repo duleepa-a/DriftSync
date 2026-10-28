@@ -40,6 +40,13 @@
     <div id="autoHint">Auto-accelerating · steer with ◀ ▶ · hold BRAKE to slow / reverse</div>
   </section>
 
+  <div id="fullscreenPrompt" class="fullscreen-prompt hidden">
+    <div class="fullscreen-card">
+      <p id="fullscreenMessage">The race is starting. Tap to use the full screen.</p>
+      <button id="fullscreenBtn" type="button">Play fullscreen</button>
+    </div>
+  </div>
+
   <div id="lostBanner" class="banner hidden">Disconnected. <a href="">Rejoin</a></div>
 
   <script src="/socket.io/socket.io.js"></script>

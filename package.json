@@ -10,7 +10,6 @@
     "test": "node --test"
   },
   "dependencies": {
-    "@dimforge/rapier3d-compat": "^0.19.3",
     "express": "^4.19.2",
     "qrcode": "^1.5.3",
     "socket.io": "^4.7.5",

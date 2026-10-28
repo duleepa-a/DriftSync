@@ -72,6 +72,18 @@ button:active { transform: scale(0.98); }
 .drive.brake { background: linear-gradient(180deg, #ff6b6b, #d63031); color: #fff; font-size: 26px; }
 .drive.pressed { filter: brightness(1.3); transform: scale(0.98); }
 
+.fullscreen-prompt {
+  position: fixed; inset: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px; background: rgba(5, 9, 18, 0.82);
+}
+.fullscreen-card {
+  width: min(420px, 90vw); padding: 24px; text-align: center;
+  background: #18243e; border-radius: 18px;
+}
+.fullscreen-card p { margin-bottom: 18px; line-height: 1.4; }
+.fullscreen-card button { margin: 0; }
+
 #autoHint {
   position: absolute; bottom: 10px; left: 0; right: 0; text-align: center;
   font-size: 12px; opacity: 0.55;
