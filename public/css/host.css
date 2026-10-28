@@ -87,7 +87,7 @@ html, body {
   box-shadow: 0 30px 80px rgba(0,0,0,0.6);
   text-align: center;
 }
-.lobby-card h1 { font-size: 44px; margin-bottom: 6px; }
+.lobby-card h1 { font-size: 30px; margin-bottom: 6px; }
 .tagline { opacity: 0.75; margin-bottom: 26px; }
 
 .join { display: flex; gap: 30px; align-items: center; justify-content: center; flex-wrap: wrap; margin-bottom: 24px; }
