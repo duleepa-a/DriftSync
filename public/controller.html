@@ -5,22 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="theme-color" content="#080e13" />
-  <title>Tilt Racer | Driver Control</title>
+  <meta name="theme-color" content="#0b1020" />
+  <title>Tilt Racer — Controller</title>
   <link rel="stylesheet" href="css/controller.css" />
-  <link rel="stylesheet" href="css/theme.css" />
 </head>
 <body>
   <!-- Join screen -->
   <section id="join" class="screen">
-    <div class="card race-panel">
-      <span class="eyebrow">Driver Control</span>
-      <h1>Join Race</h1>
-      <p>Enter the room code shown on the race screen.</p>
+    <div class="card">
+      <h1>🏎 Controller</h1>
+      <p>Enter the 4-letter code shown on the game screen.</p>
       <input id="codeInput" maxlength="4" autocapitalize="characters" autocomplete="off"
              inputmode="text" placeholder="CODE" />
-      <input id="nameInput" maxlength="10" autocomplete="off" placeholder="Driver name (optional)" />
-      <button id="joinBtn" class="race-action">Join Race</button>
+      <input id="nameInput" maxlength="10" autocomplete="off" placeholder="Your name (optional)" />
+      <button id="joinBtn">Join game</button>
       <div id="joinError" class="error"></div>
     </div>
   </section>
@@ -45,18 +43,17 @@
       </button>
     </div>
 
-    <div id="autoHint">AUTO ACCELERATION · STEER LEFT / RIGHT · HOLD BRAKE TO SLOW OR REVERSE</div>
+    <div id="autoHint">Auto-accelerating · steer with ◀ ▶ · hold BRAKE to slow / reverse</div>
   </section>
 
   <div id="fullscreenPrompt" class="fullscreen-prompt hidden">
-    <div class="fullscreen-card race-panel">
-      <span class="eyebrow">Race Ready</span>
+    <div class="fullscreen-card">
       <p id="fullscreenMessage">The race is starting. Tap to use the full screen.</p>
-      <button id="fullscreenBtn" class="race-action" type="button">Play Fullscreen</button>
+      <button id="fullscreenBtn" type="button">Play fullscreen</button>
     </div>
   </div>
 
-  <div id="lostBanner" class="banner hidden">Signal lost. <a href="">Rejoin race</a></div>
+  <div id="lostBanner" class="banner hidden">Disconnected. <a href="">Rejoin</a></div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="js/controller.js"></script>
