@@ -1,4 +1,4 @@
-# Tilt Racer
+# Burnout
 
 A local multiplayer browser racing game. One laptop runs the race and renders a Three.js view for each player. Up to four phones join over the same Wi-Fi network and act as controllers. The car accelerates automatically; players steer with left and right buttons and hold brake to slow down or reverse.
 

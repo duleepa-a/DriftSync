@@ -3,8 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tilt Racer — Game Screen</title>
+  <meta name="theme-color" content="#080e13" />
+  <title>Burnout — Game Screen</title>
   <link rel="stylesheet" href="css/host.css" />
+  <link rel="stylesheet" href="css/interface-theme.css" />
   <!-- Resolve bare "three" import to the locally served module (offline-safe). -->
   <script type="importmap">
     {
@@ -28,7 +30,7 @@
   <!-- Lobby (shown before the race starts) -->
   <div id="lobby">
     <div class="lobby-card">
-      <h1>🏎 Tilt&nbsp;Racer</h1>
+      <h1>Burnout</h1>
       <p class="tagline">Use your phone as the controller. Up to 4 players.</p>
 
       <div class="join">
@@ -58,7 +60,7 @@
   <!-- Results screen -->
   <div id="results" class="hidden">
     <div class="lobby-card">
-      <h1 id="resultsTitle">🏁 Finish!</h1>
+      <h1 id="resultsTitle">Results</h1>
       <div class="standings" id="standings"></div>
       <button id="restartBtn">Race again</button>
     </div>

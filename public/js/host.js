@@ -532,20 +532,17 @@ function updateLobby() {
   const bySlot = new Map(ps.map((p) => [p.slot, p]));
   let html = '';
   const colors = ['#ff4757', '#1e90ff', '#2ed573', '#ffa502'];
-  const names = ['Red', 'Blue', 'Green', 'Orange'];
+  const names = ['Player 1', 'Player 2', 'Player 3', 'Player 4'];
   for (let s = 0; s < 4; s++) {
     const p = bySlot.get(s);
     if (p) {
       html += `<div class="pslot filled">
-        <div class="dot" style="background:${p.color}"></div>
-        <div class="pname">${escapeHtml(p.name)}</div>
+        <div class="pname" style="color:${colors[s]}">${escapeHtml(p.name)}</div>
         <div class="pstat">${p.ready ? '✓ Ready' : 'Connected'}</div>
       </div>`;
     } else {
       html += `<div class="pslot empty">
-        <div class="dot" style="background:${colors[s]};opacity:.25"></div>
-        <div class="pname">${names[s]}</div>
-        <div class="pstat">waiting…</div>
+        <div class="pstat" style="color:${colors[s]}">waiting…</div>
       </div>`;
     }
   }
@@ -637,13 +634,12 @@ function endRace() {
   G.state = 'results';
   audio.silenceAll();
   const ranks = rankings();
-  document.getElementById('resultsTitle').textContent = '🏁 Results';
+  document.getElementById('resultsTitle').textContent = 'Results';
   document.getElementById('standings').innerHTML = ranks.map((p, i) => {
     const place = i + 1;
     const time = p.finished ? formatTime(p.finishTime) : `${p.lap} lap${p.lap === 1 ? '' : 's'}`;
     return `<div class="standing">
       <span class="rank">${['🥇', '🥈', '🥉'][i] || (place + '.')}</span>
-      <span class="dot" style="background:${p.color}"></span>
       <span class="sname">${escapeHtml(p.name)}</span>
       <span class="stime">${time}</span>
     </div>`;

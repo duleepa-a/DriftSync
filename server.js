@@ -1,5 +1,5 @@
 /**
- * Tilt Racer - local multiplayer car game server.
+ * Burnout - local multiplayer car game server.
  *
  * Responsibilities:
  *  - Serve the host (game) page and the controller (phone) page.
@@ -252,7 +252,7 @@ io.on('connection', (socket) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   const ip = lanIp();
-  console.log('\n  🏎  Tilt Racer is running!\n');
+  console.log('\n  🏎  Burnout is running!\n');
   console.log(`  On this laptop, open:   http://localhost:${PORT}`);
   console.log(`  Phones join via QR, or: http://${ip}:${PORT}/controller.html`);
   console.log('\n  (Phones must be on the same Wi-Fi. Allow Node through the firewall if prompted.)\n');

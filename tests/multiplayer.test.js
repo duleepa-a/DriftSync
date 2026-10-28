@@ -39,7 +39,7 @@ test('two controllers and a late join get separate slots and input routes', asyn
   const clients = [];
   try {
     await new Promise((resolve, reject) => {
-      server.stdout.on('data', (chunk) => { if (String(chunk).includes('Tilt Racer is running')) resolve(); });
+      server.stdout.on('data', (chunk) => { if (String(chunk).includes('Burnout is running')) resolve(); });
       server.once('exit', (code) => reject(new Error(`server exited: ${code}`)));
     });
     async function open() {
