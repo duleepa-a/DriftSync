@@ -15,7 +15,7 @@ function client() {
     if (index === -1) messages.push(packet);
     else waiting.splice(index, 1)[0].resolve(packet);
   });
-  const next = (matches) => {
+  const next = (matches, timeoutMs = 3000) => {
     const index = messages.findIndex(matches);
     if (index !== -1) return Promise.resolve(messages.splice(index, 1)[0]);
     return new Promise((resolve, reject) => {
@@ -24,7 +24,7 @@ function client() {
       setTimeout(() => {
         const at = waiting.indexOf(entry);
         if (at !== -1) { waiting.splice(at, 1); reject(new Error('Socket.IO packet timed out')); }
-      }, 3000).unref();
+      }, timeoutMs).unref();
     });
   };
   return { ws, next, emit: (name, value, ack) => ws.send(`42${ack || ''}${JSON.stringify([name, value])}`) };
@@ -58,6 +58,8 @@ test('two controllers and a late join get separate slots and input routes', asyn
     const second = await open();
     second.emit('ctrl:join', { code: room.code }, 1);
     const secondJoin = JSON.parse((await second.next((p) => p.startsWith('431'))).slice(3))[0];
+    await host.next((p) => p.startsWith('42["player:join"'));
+    const secondPlayer = JSON.parse((await host.next((p) => p.startsWith('42["player:join"'))).slice(2))[1];
     assert.equal(firstJoin.slot, 0);
     assert.equal(secondJoin.slot, 1);
     first.emit('ctrl:input', { steer: 1, brake: 0 });
@@ -68,6 +70,16 @@ test('two controllers and a late join get separate slots and input routes', asyn
     }
     assert.deepEqual(inputs.map((p) => [p.slot, p.input.steer, p.input.brake]).sort(),
       [[0, 1, 0], [1, -1, 1]]);
+    first.emit('host:start', {});
+    first.emit('host:reset', {});
+    first.emit('host:feedback', { id: secondPlayer.id, vibrate: 100 });
+    await assert.rejects(host.next((p) => p.startsWith('42["game:'), 150));
+    await assert.rejects(second.next((p) => p.startsWith('42["ctrl:feedback"'), 150));
+    first.emit('ctrl:input', { steer: 99, brake: -2 });
+    const clamped = JSON.parse((await host.next((p) => p.startsWith('42["player:input"'))).slice(2))[1];
+    assert.deepEqual(clamped.input, { steer: 1, brake: 0 });
+    first.emit('ctrl:input', { steer: 'left', brake: 0 });
+    await assert.rejects(host.next((p) => p.startsWith('42["player:input"'), 150));
     host.emit('host:start', {});
     const late = await open();
     late.emit('ctrl:join', { code: room.code }, 1);
