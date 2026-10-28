@@ -32,9 +32,15 @@
     </div>
 
     <div id="drivePad">
-      <button id="leftBtn" class="drive left">◀<small>LEFT</small></button>
-      <button id="brakeBtn" class="drive brake">BRAKE</button>
-      <button id="rightBtn" class="drive right"><small>RIGHT</small>▶</button>
+      <button id="leftBtn" class="drive steer left" type="button" aria-label="Steer left">
+        <span class="drive-content"><span class="chevron" aria-hidden="true">❮</span><small>LEFT</small></span>
+      </button>
+      <button id="brakeBtn" class="drive brake" type="button" aria-label="Brake or reverse">
+        <span class="drive-content"><strong>BRAKE / REV</strong><small>HOLD TO SLOW</small></span>
+      </button>
+      <button id="rightBtn" class="drive steer right" type="button" aria-label="Steer right">
+        <span class="drive-content"><span class="chevron" aria-hidden="true">❯</span><small>RIGHT</small></span>
+      </button>
     </div>
 
     <div id="autoHint">Auto-accelerating · steer with ◀ ▶ · hold BRAKE to slow / reverse</div>
