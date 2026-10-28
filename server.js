@@ -23,7 +23,7 @@ const MAX_PLAYERS = 4;
 
 // Per-slot identity. Index 0..3 map to player 1..4.
 const PLAYER_COLORS = ['#ff4757', '#1e90ff', '#2ed573', '#ffa502']; // red, blue, green, orange
-const PLAYER_NAMES = ['Red', 'Blue', 'Green', 'Orange'];
+const PLAYER_NAMES = ['Driver 1', 'Driver 2', 'Driver 3', 'Driver 4'];
 
 const app = express();
 const server = http.createServer(app);

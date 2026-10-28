@@ -532,20 +532,16 @@ function updateLobby() {
   const bySlot = new Map(ps.map((p) => [p.slot, p]));
   let html = '';
   const colors = ['#ff4757', '#1e90ff', '#2ed573', '#ffa502'];
-  const names = ['Red', 'Blue', 'Green', 'Orange'];
   for (let s = 0; s < 4; s++) {
     const p = bySlot.get(s);
     if (p) {
-      html += `<div class="pslot filled">
-        <div class="dot" style="background:${p.color}"></div>
+      html += `<div class="pslot filled" style="--slot-color:${colors[s]}">
         <div class="pname">${escapeHtml(p.name)}</div>
         <div class="pstat">${p.ready ? '✓ Ready' : 'Connected'}</div>
       </div>`;
     } else {
-      html += `<div class="pslot empty">
-        <div class="dot" style="background:${colors[s]};opacity:.25"></div>
-        <div class="pname">${names[s]}</div>
-        <div class="pstat">waiting…</div>
+      html += `<div class="pslot empty" style="--slot-color:${colors[s]}">
+        <div class="pstat">Waiting…</div>
       </div>`;
     }
   }
