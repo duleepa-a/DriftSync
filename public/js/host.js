@@ -182,7 +182,7 @@ window.addEventListener('resize', () => {
 // ---------------------------------------------------------------------------
 function addPlayer(p) {
   if (G.players.has(p.id)) return;
-  G.players.set(p.id, {
+  const player = {
     id: p.id,
     slot: p.slot,
     color: p.color,
@@ -212,7 +212,14 @@ function addPlayer(p) {
     finishTime: 0,
     finishRank: 0,
     lastFeedback: 0,
-  });
+  };
+  G.players.set(p.id, player);
+  // A controller can join during countdown or a race. It needs a car before
+  // the next animation frame, which updates every player in the map.
+  if (G.state === 'countdown' || G.state === 'racing') {
+    spawnPlayer(player);
+    layoutHud();
+  }
   updateLobby();
 }
 
@@ -222,6 +229,7 @@ function removePlayer(id) {
   audio.stopVoice(id);
   if (G.physicsReady) physics.removeCar(id);
   G.players.delete(id);
+  if (G.state === 'countdown' || G.state === 'racing') layoutHud();
   updateLobby();
 }
 
@@ -234,40 +242,42 @@ function spawnCars() {
   G.useRapier = G.physicsReady && !G.forceArcade;
   if (G.useRapier) physics.resetCars();
 
+  activePlayers().forEach(spawnPlayer);
+}
+
+function spawnPlayer(p) {
   const grid = G.track.startPositions;
-  activePlayers().forEach((p, i) => {
-    if (!p.mesh) {
-      p.mesh = createCarMesh(p.color);
-      p.mesh.rotation.order = 'YXZ'; // yaw, then pitch/roll for weight transfer
-      scene.add(p.mesh);
-    }
-    const g = grid[i % grid.length];
-    p.pos.copy(g.pos);
-    p.heading = g.heading;
-    p.speed = 0;
-    p.prevSpeed = 0;
-    p.rpm = 0;
-    p.gear = 0;
-    p.shiftPulse = 0;
-    p.lap = 0;
-    p.nextGate = 1;
-    p.gatesPassed = 0;
-    p.finished = false;
-    p.finishTime = 0;
-    p.finishRank = 0;
-    p.input = { steer: 0, throttle: 0, brake: 0 };
-    p.steerSmooth = 0;
-    const ni = G.track.nearestInfo(p.pos, 0);
-    p.sampleIndex = ni.index;
-    p.groundY = ni.groundY;
-    p.mesh.position.set(p.pos.x, p.groundY, p.pos.z);
-    p.mesh.rotation.set(0, p.heading, 0);
+  if (!p.mesh) {
+    p.mesh = createCarMesh(p.color);
+    p.mesh.rotation.order = 'YXZ'; // yaw, then pitch/roll for weight transfer
+    scene.add(p.mesh);
+  }
+  const g = grid[p.slot % grid.length];
+  p.pos.copy(g.pos);
+  p.heading = g.heading;
+  p.speed = 0;
+  p.prevSpeed = 0;
+  p.rpm = 0;
+  p.gear = 0;
+  p.shiftPulse = 0;
+  p.lap = 0;
+  p.nextGate = 1;
+  p.gatesPassed = 0;
+  p.finished = false;
+  p.finishTime = 0;
+  p.finishRank = 0;
+  p.input = { steer: 0, throttle: 0, brake: 0 };
+  p.steerSmooth = 0;
+  const ni = G.track.nearestInfo(p.pos, 0);
+  p.sampleIndex = ni.index;
+  p.groundY = ni.groundY;
+  p.mesh.position.set(p.pos.x, p.groundY, p.pos.z);
+  p.mesh.rotation.set(0, p.heading, 0);
 
-    if (G.useRapier) physics.addCar(p.id, { pos: g.pos, heading: g.heading });
+  if (G.useRapier) physics.addCar(p.id, { pos: g.pos, heading: g.heading });
 
-    // Snap camera behind the car immediately.
-    placeCamera(p, true);
-  });
+  // Snap camera behind the car immediately.
+  placeCamera(p, true);
 }
 
 // Read a car's state back from the Rapier sim into the player object + mesh.
