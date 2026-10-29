@@ -26,6 +26,8 @@ The server listens on port 3000 by default. Set `PORT` to change it. If the QR c
 3. Steer with **LEFT** and **RIGHT**. Hold **BRAKE** to slow down; hold it from a stop to reverse. The car accelerates when the brake is released.
 4. Complete three laps. The first car to finish wins.
 
+Collect the glowing **N₂O bottles** on the main and back straights for an automatic two-second nitrous boost. Each station has three bottles across the road; a collected bottle returns after eight seconds. Braking cancels the boost. Nitrous raises the speed limit from 46 to 64 m/s (about 103 to 143 mph), then eases back to normal speed. Normal acceleration is 26 m/s².
+
 On a laptop controller tab, use **Left/Right** or **A/D** to steer and **Down**, **S**, or **Space** to brake. Audio is temporarily disabled. Press **B** on the host screen to toggle postprocessing.
 
 If a phone cannot connect, check that it is on the same Wi-Fi network and that the laptop firewall allows Node.js on private networks. If the host disconnects, the old room closes; the host creates a new code on reconnect and controllers must join that new room.
@@ -48,6 +50,8 @@ Key files:
 | `server.js` | Express assets, rooms, roles, and Socket.IO routing |
 | `public/js/host.js` | Host scene, cameras, UI, race lifecycle, and rendering loop |
 | `public/js/physics.js` | Car movement and wall handling |
+| `public/js/nitro.js` | Nitrous tuning, straight-section placement, collection, and respawn |
+| `public/js/nitro-visuals.js` | Glowing bottle and road-ring visuals |
 | `public/js/race.js` | Lap gate progress and rankings |
 | `public/js/track.js` | Track geometry, scenery, and gate locations |
 | `public/js/carmesh.js` | Car asset loading, cloning, and disposal |

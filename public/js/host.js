@@ -10,6 +10,8 @@ import { createCarMesh, disposeCarMesh, loadCarAssets } from './carmesh.js';
 import * as audio from './audio.js';
 import { PHYS, updateCar } from './physics.js';
 import { resetMotion, savePreviousPose, renderCar } from './motion.js';
+import { NITRO, createNitroPickups, resetNitroPickups, updateNitroPickups } from './nitro.js';
+import { createNitroVisuals } from './nitro-visuals.js';
 import { TOTAL_LAPS, advanceGates, rankings as rankPlayers } from './race.js';
 
 /* global io */
@@ -29,6 +31,7 @@ const G = {
   players: new Map(), // socketId -> player
   assetsReady: false, // real car model loaded?
   track: null,
+  nitroPickups: [],
   raceStart: 0,
   countdownEnd: 0,
   winnerId: null,
@@ -115,6 +118,10 @@ new RGBELoader().load('/assets/sky_day.hdr', (hdr) => {
 }, undefined, () => pmrem.dispose());
 
 G.track = buildTrack(scene);
+G.nitroPickups = createNitroPickups(G.track);
+const nitroVisuals = createNitroVisuals(scene, G.nitroPickups);
+let nitroVisualTime = 0;
+nitroVisuals.update(0);
 
 // Preload the real car model; until it's ready, the Start button waits.
 loadCarAssets().then(() => { G.assetsReady = true; updateLobby(); });
@@ -223,6 +230,9 @@ function activePlayers() {
 }
 
 function spawnCars() {
+  resetNitroPickups(G.nitroPickups);
+  nitroVisualTime = 0;
+  nitroVisuals.update(0);
   activePlayers().forEach(spawnPlayer);
 }
 
@@ -237,6 +247,7 @@ function spawnPlayer(p) {
   p.pos.copy(g.pos);
   p.heading = g.heading;
   p.speed = 0;
+  p.nitroTime = 0;
   p.prevSpeed = 0;
   p.rpm = 0;
   p.gear = 0;
@@ -466,6 +477,10 @@ function layoutHud() {
         </div>
         <div class="hud-stat right"><span class="lbl">LAP</span><span class="num" data-lap>1</span><span class="den">|${TOTAL_LAPS}</span></div>
       </div>
+      <div class="hud-nitro hidden" data-nitro>
+        <div><strong>NITRO</strong><span data-nitro-time></span></div>
+        <div class="nitro-meter"><i data-nitro-bar></i></div>
+      </div>
       <div class="hud-speed"><span class="mph" data-mph>0</span><span class="mphlbl">MPH</span></div>`;
     hud.appendChild(cell);
     return {
@@ -474,6 +489,9 @@ function layoutHud() {
       lap: cell.querySelector('[data-lap]'),
       bar: cell.querySelector('[data-bar]'),
       mph: cell.querySelector('[data-mph]'),
+      nitro: cell.querySelector('[data-nitro]'),
+      nitroTime: cell.querySelector('[data-nitro-time]'),
+      nitroBar: cell.querySelector('[data-nitro-bar]'),
     };
   });
 }
@@ -492,6 +510,10 @@ function updateHud(ps, rects, ranks) {
     const frac = ((p.nextGate - 1 + gateCount) % gateCount) / gateCount;
     c.bar.style.width = Math.round((p.finished ? 1 : frac) * 100) + '%';
     c.mph.textContent = Math.max(0, Math.round(Math.abs(p.speed) * MPH));
+    const nitroTime = p.nitroTime || 0;
+    c.nitro.classList.toggle('hidden', nitroTime <= 0);
+    c.nitroTime.textContent = nitroTime.toFixed(1) + 's';
+    c.nitroBar.style.width = (nitroTime / NITRO.duration * 100) + '%';
   });
 }
 function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
@@ -694,9 +716,12 @@ function backToLobby() {
   raceEpoch++;
   G.state = 'lobby';
   G.winnerId = null;
+  resetNitroPickups(G.nitroPickups);
+  nitroVisuals.update(0);
   audio.silenceAll();
   (G.track.startLights || []).forEach((m) => setLight(m, 'off'));
   for (const p of G.players.values()) {
+    p.nitroTime = 0;
     if (p.mesh) { scene.remove(p.mesh); disposeCarMesh(p.mesh); p.mesh = null; }
   }
   resultsEl.classList.add('hidden');
@@ -827,12 +852,15 @@ function updateRace(dt) {
       updateCar(p, SIM_STEP, G.track, { dropSkid, onGate: updateGates });
     }
     handleCollisions();
+    updateNitroPickups(G.nitroPickups, G.players.values(), SIM_STEP, (p) => feedback(p, { vibrate: 70 }));
     accumulated -= SIM_STEP;
   }
   for (const p of G.players.values()) {
     renderCar(p, accumulated / SIM_STEP);
     placeCamera(p, false, dt);
   }
+  nitroVisualTime += dt;
+  nitroVisuals.update(nitroVisualTime);
 }
 function loop(now) {
   const dt = Math.min(MAX_FRAME, Math.max(0, (now - last) / 1000));

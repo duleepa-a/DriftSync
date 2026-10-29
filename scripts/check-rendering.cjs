@@ -19,6 +19,13 @@ app.post('/render-result', express.json({ limit: '8mb' }), (req, res) => {
     delete report.screenshot;
     report.screenshotPath = screenshotPath;
   }
+  for (const key of ['nitroScreenshot', 'boostScreenshot']) {
+    if (!report[key]) continue;
+    const screenshotPath = path.join(os.tmpdir(), 'driftsync-' + key + '-dpr' + scale + '.png');
+    fs.writeFileSync(screenshotPath, Buffer.from(report[key].split(',')[1], 'base64'));
+    delete report[key];
+    report[key + 'Path'] = screenshotPath;
+  }
   console.log(JSON.stringify(report, null, 2));
   if (report.error || report.cases.some(test => test.glError || test.views.some(view => view.bright < 0.2 || view.opaque < 0.95))) process.exitCode = 1;
   res.sendStatus(200);
@@ -34,17 +41,18 @@ app.get('/js/host.js', (_req, res) => {
   // Stop only the scheduled loop, so each test can inspect a completed frame.
   const source = fs.readFileSync(path.join(root, 'public/js/host.js'), 'utf8')
     .replaceAll('requestAnimationFrame(loop);', '')
-    + '\nexport { G, renderer, sceneTarget, addPlayer, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera };';
+    + '\nexport { G, scene, renderer, sceneTarget, addPlayer, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera };';
   res.type('js').send(source);
 });
 app.get('/render-check.mjs', (_req, res) => res.type('js').send(`
-import { G, renderer, addPlayer, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera } from '/js/host.js';
+import { G, scene, renderer, addPlayer, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera } from '/js/host.js';
+import { resetMotion, renderCar } from '/js/motion.js';
 const report = document.createElement('pre');
 report.id = 'render-result';
 document.body.appendChild(report);
 const cases = [];
 const motion = [];
-let screenshot;
+let screenshot, nitroScreenshot, boostScreenshot, nitro;
 function inspectFrame(name, count) {
   const gl = renderer.getContext();
   const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
@@ -119,9 +127,41 @@ try {
       await new Promise(requestAnimationFrame);
       renderSplit();
       inspectFrame('2 players, resize', 2);
+
+      const players = [...G.players.values()];
+      // Approach separate bottles on the back straight using real physics.
+      const bottles = [G.nitroPickups[3], G.nitroPickups[5]];
+      if (bottles.some(p => !p)) throw new Error('Missing straight-section nitro stations');
+      players.forEach((p, i) => {
+        const bottle = bottles[i];
+        p.heading = bottle.heading;
+        p.pos.set(bottle.pos.x - Math.sin(p.heading) * 12, 0, bottle.pos.z - Math.cos(p.heading) * 12);
+        p.groundY = G.track.nearestInfo(p.pos).groundY;
+        p.speed = p.prevSpeed = 46;
+        resetMotion(p); renderCar(p, 1); placeCamera(p, true);
+      });
+      renderSplit();
+      inspectFrame('2 players approaching nitro', 2);
+      nitroScreenshot = renderer.domElement.toDataURL('image/png');
+      for (let frame = 0; frame < 90; frame++) updateRace(1 / 120);
+      renderSplit();
+      inspectFrame('2 players collecting nitro', 2);
+      boostScreenshot = renderer.domElement.toDataURL('image/png');
+      const indicators = [...document.querySelectorAll('[data-nitro]')];
+      if (players.some(p => p.nitroTime <= 0 || p.speed <= 46)) throw new Error('Nitro failed to increase speed');
+      if (bottles.some(p => p.cooldown <= 0 || scene.getObjectByName('nitro-' + p.id).visible)) throw new Error('Collected bottle did not disappear');
+      if (indicators.some(el => el.classList.contains('hidden') || el.getBoundingClientRect().width <= 0)) throw new Error('Nitro HUD is missing');
+      nitro = { stations: G.nitroPickups.length / 3, speeds: players.map(p => p.speed), activeIndicators: indicators.length };
+      players[0].input.brake = 1;
+      updateRace(1 / 60); renderSplit();
+      if (players[0].nitroTime !== 0 || !indicators[0].classList.contains('hidden') || players[1].nitroTime <= 0) throw new Error('Braking must cancel nitro for that player only');
+      for (let frame = 0; frame < 500; frame++) updateRace(1 / 60);
+      if (bottles.some(p => p.cooldown !== 0 || !scene.getObjectByName('nitro-' + p.id).visible)) throw new Error('Nitro did not respawn');
+      spawnCars(); renderSplit();
+      if (players.some(p => p.nitroTime !== 0) || G.nitroPickups.some(p => p.cooldown !== 0)) throw new Error('Restart retained nitro state');
     }
   }
-  report.textContent = JSON.stringify({ devicePixelRatio, motion, cases, screenshot });
+  report.textContent = JSON.stringify({ devicePixelRatio, motion, nitro, cases, screenshot, nitroScreenshot, boostScreenshot });
 } catch (error) { report.textContent = JSON.stringify({ error: error.stack }); }
 await fetch('/render-result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: report.textContent });
 `));
