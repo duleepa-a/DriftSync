@@ -94,7 +94,6 @@ export function buildTrack(scene) {
   // ---------- Scenery ----------
   buildScenery(scene, samples, halfWidth, terrainHeight);
   buildHills(scene, groundBase);
-  buildGrandstands(scene, samples, tangents, halfWidth, terrainHeight);
   buildTireBarriers(scene, samples, tangents, halfWidth);
 
   // ---------- Lap gates ----------
@@ -219,7 +218,7 @@ function buildWall(scene, samples, tangents, off, height) {
   geo.setIndex(indices);
   geo.computeVertexNormals();
   const mat = new THREE.MeshStandardMaterial({
-    map: makeWallTexture(), roughness: 0.85, metalness: 0.05, side: THREE.DoubleSide,
+    map: makeWallTexture(), roughness: 0.95, metalness: 0, side: THREE.DoubleSide,
   });
   const wall = new THREE.Mesh(geo, mat);
   wall.castShadow = true;
@@ -422,51 +421,6 @@ function buildHills(scene, groundBase) {
   scene.add(inst);
 }
 
-// Stadium grandstands around the outer edge of the circuit.
-function buildGrandstands(scene, samples, tangents, halfWidth, terrainHeight) {
-  const seatMat = new THREE.MeshStandardMaterial({ map: makeSeatTexture(), roughness: 0.95 });
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0x9a9a9a, roughness: 0.9 });
-  const roofMat = new THREE.MeshStandardMaterial({ color: 0xced3da, roughness: 0.7, metalness: 0.1 });
-  const centroid = new THREE.Vector3(0, 0, 0);
-
-  const indices = [40, 130, 220, 310, 400, 480];
-  for (const i of indices) {
-    const c = samples[i % samples.length];
-    let n = sideNormal(tangents[i % samples.length]);
-    // ensure normal points OUTWARD (away from track centre)
-    if (n.dot(new THREE.Vector3().subVectors(c, centroid)) < 0) n = n.clone().multiplyScalar(-1);
-    const len = 80;
-    const dist = halfWidth + 30;
-    const px = c.x + n.x * dist, pz = c.z + n.z * dist;
-    const faceAngle = Math.atan2(-n.x, -n.z); // face inward toward the track
-
-    const g = new THREE.Group();
-    g.position.set(px, terrainHeight(dist, c.y), pz);
-    g.rotation.y = faceAngle;
-
-    const seats = new THREE.Mesh(new THREE.BoxGeometry(len, 13, 20), seatMat);
-    seats.rotation.x = -0.42; // slope the seating up and back
-    seats.position.set(0, 7, -3);
-    seats.receiveShadow = true; seats.castShadow = true;
-    g.add(seats);
-
-    const base = new THREE.Mesh(new THREE.BoxGeometry(len, 4, 6), wallMat);
-    base.position.set(0, 2, 7);
-    g.add(base);
-
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(len + 4, 1, 14), roofMat);
-    roof.position.set(0, 15.5, -7);
-    roof.castShadow = true;
-    g.add(roof);
-    for (const sx of [-len / 2 + 3, 0, len / 2 - 3]) {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(1.2, 16, 1.2), roofMat);
-      post.position.set(sx, 8, -13);
-      g.add(post);
-    }
-    scene.add(g);
-  }
-}
-
 // Stacks of tires lining the inside of the walls (decorative).
 function buildTireBarriers(scene, samples, tangents, halfWidth) {
   const N = samples.length;
@@ -489,29 +443,6 @@ function buildTireBarriers(scene, samples, tangents, halfWidth) {
   inst.count = count;
   inst.instanceMatrix.needsUpdate = true;
   scene.add(inst);
-}
-
-// A packed crowd: dark seating with thousands of small multi-coloured dots
-// (spectators), so the stand reads as a filled grandstand, not a rainbow smear.
-function makeSeatTexture() {
-  const tex = canvasTexture(256, 256, (ctx) => {
-    ctx.fillStyle = '#2b2f36'; ctx.fillRect(0, 0, 256, 256);
-    // faint seat rows
-    ctx.fillStyle = 'rgba(0,0,0,0.25)';
-    for (let y = 0; y < 256; y += 8) ctx.fillRect(0, y, 256, 2);
-    const cols = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#ecf0f1', '#e67e22', '#9b59b6', '#16a085', '#ffffff', '#34495e'];
-    for (let y = 3; y < 256; y += 6) {
-      for (let x = 2; x < 256; x += 5) {
-        if (Math.random() < 0.7) {
-          ctx.fillStyle = cols[(Math.random() * cols.length) | 0];
-          ctx.fillRect(x + (Math.random() * 2 | 0), y, 3, 3);
-        }
-      }
-    }
-  });
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(12, 5);
-  return tex;
 }
 
 function makeStartGrid(samples, tangents, halfWidth) {
@@ -560,23 +491,21 @@ function makeKerbMat() {
   return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.7 });
 }
 
-// Trackside advertising hoardings (sponsor boards) baked into the wall.
+// Neutral grey concrete barriers with subtle grain and panel joints.
 function makeWallTexture() {
   const tex = canvasTexture(256, 64, (ctx) => {
-    const panels = ['#0a4ea2', '#d62828', '#f7f7f7', '#1f9d55', '#f59f00', '#222831'];
-    const pw = 256 / 6;
-    for (let i = 0; i < 6; i++) {
-      const x = i * pw;
-      ctx.fillStyle = panels[i];
-      ctx.fillRect(x, 0, pw, 64);
-      // a "logo": contrasting block + bar
-      ctx.fillStyle = i === 2 ? '#0a4ea2' : 'rgba(255,255,255,0.92)';
-      ctx.fillRect(x + 8, 20, pw - 16, 14);
-      ctx.fillStyle = 'rgba(0,0,0,0.18)';
-      ctx.fillRect(x + 8, 40, pw - 16, 6);
-      ctx.fillStyle = 'rgba(0,0,0,0.25)';
-      ctx.fillRect(x + pw - 2, 0, 2, 64); // seam
+    ctx.fillStyle = '#909090';
+    ctx.fillRect(0, 0, 256, 64);
+    for (let i = 0; i < 700; i++) {
+      const shade = Math.floor(125 + Math.random() * 38);
+      ctx.fillStyle = `rgba(${shade},${shade},${shade},0.3)`;
+      ctx.fillRect(Math.random() * 256, Math.random() * 64, 1, 1);
     }
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    for (let x = 126; x < 256; x += 128) ctx.fillRect(x, 0, 2, 64);
+    ctx.fillRect(0, 59, 256, 5);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(0, 0, 256, 2);
   });
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.ClampToEdgeWrapping;
