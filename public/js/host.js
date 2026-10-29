@@ -18,6 +18,7 @@ import { TOTAL_LAPS, advanceGates, rankings as rankPlayers } from './race.js';
 // ---------------------------------------------------------------------------
 const MPH = 2.23694; // m/s -> mph
 const COLLIDE_DIST = 3.6;
+const AUDIO_ENABLED = false; // Temporary: keep the host game silent.
 
 // ---------------------------------------------------------------------------
 // Game state
@@ -56,9 +57,12 @@ const scene = new THREE.Scene();
 //   final ACES tone-map + sRGB to the canvas.
 // ---------------------------------------------------------------------------
 let POST = true;
-const sceneTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
+const drawingSize = renderer.getDrawingBufferSize(new THREE.Vector2());
+const sceneTarget = new THREE.WebGLRenderTarget(drawingSize.x, drawingSize.y, {
   type: THREE.HalfFloatType,
-  samples: 4, // MSAA for the scene
+  // Each camera renders into part of this target. Multisample resolves after
+  // every render can invalidate the previous camera's pixels on some GPUs.
+  samples: 0,
 });
 
 const ColorGradeShader = {
@@ -152,7 +156,8 @@ const overview = new THREE.PerspectiveCamera(55, window.innerWidth / window.inne
 window.addEventListener('resize', () => {
   const w = window.innerWidth, h = window.innerHeight;
   renderer.setSize(w, h);
-  sceneTarget.setSize(w, h);
+  renderer.getDrawingBufferSize(drawingSize);
+  sceneTarget.setSize(drawingSize.x, drawingSize.y);
   composer.setSize(w, h);
   layoutHud();
 });
@@ -356,26 +361,42 @@ function renderSplit() {
   const rects = layoutRects(ps.length);
   const H = window.innerHeight;
 
+  if (POST) {
+    sceneTarget.viewport.set(0, 0, sceneTarget.width, sceneTarget.height);
+    sceneTarget.scissorTest = false;
+  }
   renderer.setRenderTarget(POST ? sceneTarget : null);
   renderer.setScissorTest(false);
   renderer.clear();
-  renderer.setScissorTest(true);
 
   const ranks = rankings();
+  const pixelRatio = renderer.getPixelRatio();
   ps.forEach((p, i) => {
     const r = rects[i];
     if (!r) return;
     const y = H - r.y - r.h; // convert top-left to bottom-left origin
-    renderer.setViewport(r.x, y, r.w, r.h);
-    renderer.setScissor(r.x, y, r.w, r.h);
+    if (POST) {
+      // Shadow rendering switches render targets. Three.js restores the
+      // target's own viewport and scissor when it switches back.
+      const x0 = Math.round(r.x * pixelRatio), x1 = Math.round((r.x + r.w) * pixelRatio);
+      const y0 = Math.round(y * pixelRatio), y1 = Math.round((y + r.h) * pixelRatio);
+      sceneTarget.viewport.set(x0, y0, x1 - x0, y1 - y0);
+      sceneTarget.scissor.set(x0, y0, x1 - x0, y1 - y0);
+      sceneTarget.scissorTest = true;
+      renderer.setRenderTarget(sceneTarget);
+    } else {
+      renderer.setViewport(r.x, y, r.w, r.h);
+      renderer.setScissor(r.x, y, r.w, r.h);
+      renderer.setScissorTest(true);
+    }
     p.camera.aspect = r.w / r.h;
     p.camera.updateProjectionMatrix();
     renderer.render(scene, p.camera);
   });
 
   renderer.setScissorTest(false);
-  renderer.setRenderTarget(null);
-  if (POST) composer.render();
+  sceneTarget.scissorTest = false;
+  presentFrame();
 
   updateHud(ps, rects, ranks);
 }
@@ -383,18 +404,34 @@ function renderSplit() {
 function renderOverview(t) {
   bloomPass.enabled = true;
   const W = window.innerWidth, H = window.innerHeight;
+  if (POST) {
+    sceneTarget.viewport.set(0, 0, sceneTarget.width, sceneTarget.height);
+    sceneTarget.scissorTest = false;
+  }
   renderer.setRenderTarget(POST ? sceneTarget : null);
   renderer.setScissorTest(false);
   renderer.clear();
-  renderer.setViewport(0, 0, W, H);
+  if (!POST) renderer.setViewport(0, 0, W, H);
   overview.aspect = W / H;
   overview.updateProjectionMatrix();
   const r = 300, a = t * 0.00008;
   overview.position.set(Math.cos(a) * r, 190, Math.sin(a) * r);
   overview.lookAt(0, 0, 0);
   renderer.render(scene, overview);
+  presentFrame();
+}
+
+function presentFrame() {
   renderer.setRenderTarget(null);
-  if (POST) composer.render();
+  // OutputPass uses the canvas viewport, which can still be the last player's
+  // rectangle (especially after toggling post-processing). Present the entire
+  // composed image, with no depth left over from direct scene rendering.
+  renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
+  renderer.setScissorTest(false);
+  if (POST) {
+    renderer.clear();
+    composer.render();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -563,16 +600,16 @@ updateLobby();
 
 startBtn.addEventListener('click', () => {
   if (activePlayers().length === 0) return;
-  // This click is the required user gesture for fullscreen + audio.
+  // This click is the required user gesture for fullscreen.
   const el = document.documentElement;
   try { (el.requestFullscreen || el.webkitRequestFullscreen || (() => {})).call(el); } catch (e) {}
-  audio.initAudio();
+  if (AUDIO_ENABLED) audio.initAudio();
   socket.emit('host:start');
 });
 
-// Mute (M) and post-processing (B).
+// Mute (M, when audio is enabled) and post-processing (B).
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'm' || e.key === 'M') audio.toggleMuted();
+  if (AUDIO_ENABLED && (e.key === 'm' || e.key === 'M')) audio.toggleMuted();
   if (e.key === 'b' || e.key === 'B') POST = !POST;
 });
 

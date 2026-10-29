@@ -34,7 +34,12 @@ const io = new Server(server, {
 });
 
 // --- Static assets -------------------------------------------------------
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders(res, filePath) {
+    // Reload game code and pages after local fixes; keep large model/sky assets cacheable.
+    if (/\.(html|js|css)$/.test(filePath)) res.setHeader('Cache-Control', 'no-store');
+  },
+}));
 // Serve three.js straight from node_modules so there is no build step and
 // no dependency on an internet connection at play time.
 app.use('/lib', express.static(path.join(__dirname, 'node_modules', 'three', 'build')));
@@ -254,6 +259,7 @@ server.listen(PORT, '0.0.0.0', () => {
   const ip = lanIp();
   console.log('\n  🏎  Burnout is running!\n');
   console.log(`  On this laptop, open:   http://localhost:${PORT}`);
+  console.log(`  Serving project:       ${__dirname}`);
   console.log(`  Phones join via QR, or: http://${ip}:${PORT}/controller.html`);
   console.log('\n  (Phones must be on the same Wi-Fi. Allow Node through the firewall if prompted.)\n');
 });
