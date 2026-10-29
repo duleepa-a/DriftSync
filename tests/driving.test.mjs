@@ -12,6 +12,52 @@ const { buildTrack } = await import(`data:text/javascript,${encodeURIComponent(t
 const physicsSource = readFileSync(resolve(root, 'public/js/physics.js'), 'utf8')
   .replace("from 'three'", `from '${pathToFileURL(resolve(root, 'node_modules/three/build/three.module.js'))}'`);
 const { updateCar } = await import(`data:text/javascript,${encodeURIComponent(physicsSource)}`);
+const motionSource = readFileSync(resolve(root, 'public/js/motion.js'), 'utf8');
+const { resetMotion, savePreviousPose, renderCar } = await import(`data:text/javascript,${encodeURIComponent(motionSource)}`);
+
+test('road height changes continuously between samples, including the lap seam', () => {
+  const context = new Proxy({}, { get: () => () => {} });
+  globalThis.document = { createElement: () => ({ getContext: () => context }) };
+  const track = buildTrack(new THREE.Scene());
+  for (let i = 0; i < track.samples.length; i++) {
+    const a = track.samples[i], b = track.samples[(i + 1) % track.samples.length];
+    for (const fraction of [0.25, 0.49, 0.51, 0.75]) {
+      const point = a.clone().lerp(b, fraction);
+      const info = track.nearestInfo(point);
+      assert.ok(Math.abs(info.groundY - point.y) < 1e-8, `height jump on segment ${i}`);
+      assert.ok(info.dist < 1e-8);
+    }
+  }
+});
+
+test('rendered motion stays continuous at different refresh rates without moving physics state', () => {
+  for (const hz of [60, 120, 144]) {
+    const p = {
+      pos: new THREE.Vector3(), groundY: 0, heading: 0, pitch: 0, roll: 0,
+      wheelSpin: 0, steerSmooth: 0, mesh: new THREE.Object3D(),
+    };
+    resetMotion(p);
+    let accumulated = 0, lastZ = 0;
+    for (let frame = 0; frame < hz * 2; frame++) {
+      accumulated += 1 / hz;
+      while (accumulated >= 1 / 60) {
+        savePreviousPose(p);
+        p.pos.z += 30 / 60;
+        accumulated -= 1 / 60;
+      }
+      const physicsZ = p.pos.z;
+      renderCar(p, accumulated / (1 / 60));
+      assert.equal(p.pos.z, physicsZ);
+      if (frame > 3) assert.ok(Math.abs(p.mesh.position.z - lastZ - 30 / hz) < 1e-9, `uneven movement at ${hz} Hz`);
+      lastZ = p.mesh.position.z;
+    }
+    // Respawning must discard the old race's interpolation history.
+    p.pos.set(100, 0, 100);
+    resetMotion(p);
+    renderCar(p, 0);
+    assert.equal(p.mesh.position.z, 100);
+  }
+});
 
 test('default driving launches and stays within the real track', () => {
   const context = new Proxy({}, { get: () => () => {} });

@@ -9,6 +9,7 @@ import { buildTrack } from './track.js';
 import { createCarMesh, disposeCarMesh, loadCarAssets } from './carmesh.js';
 import * as audio from './audio.js';
 import { PHYS, updateCar } from './physics.js';
+import { resetMotion, savePreviousPose, renderCar } from './motion.js';
 import { TOTAL_LAPS, advanceGates, rankings as rankPlayers } from './race.js';
 
 /* global io */
@@ -248,11 +249,16 @@ function spawnPlayer(p) {
   p.finishRank = 0;
   p.input = { steer: 0, throttle: 0, brake: 0 };
   p.steerSmooth = 0;
+  p.pitch = 0;
+  p.roll = 0;
+  p.wheelSpin = 0;
   const ni = G.track.nearestInfo(p.pos, 0);
   p.sampleIndex = ni.index;
   p.groundY = ni.groundY;
   p.mesh.position.set(p.pos.x, p.groundY, p.pos.z);
   p.mesh.rotation.set(0, p.heading, 0);
+  resetMotion(p);
+  renderCar(p, 1);
 
   // Snap camera behind the car immediately.
   placeCamera(p, true);
@@ -307,40 +313,39 @@ function rankings() {
   return rankPlayers(activePlayers(), G.track.gates);
 }
 
-function placeCamera(p, snap = false) {
-  const back = 5.6, height = (p.groundY || 0) + 2.5, look = 11;
-  const fx = Math.sin(p.heading), fz = Math.cos(p.heading);
-  const tx = p.pos.x - fx * back, tz = p.pos.z - fz * back;
+function placeCamera(p, snap = false, dt = 1 / 60) {
+  const pos = p.mesh.position, heading = p.mesh.rotation.y;
+  const back = 5.6, height = pos.y + 2.5, look = 11;
+  const fx = Math.sin(heading), fz = Math.cos(heading);
+  const tx = pos.x - fx * back, tz = pos.z - fz * back;
 
   if (snap) {
     p.camPos.set(tx, height, tz);
   } else {
     // Smooth the *direction* of follow, not the distance.
-    p.camPos.x += (tx - p.camPos.x) * 0.22;
-    p.camPos.z += (tz - p.camPos.z) * 0.22;
-    p.camPos.y += (height - p.camPos.y) * 0.25;
+    const follow = 1 - Math.pow(1 - 0.22, dt * 60);
+    p.camPos.x += (tx - p.camPos.x) * follow;
+    p.camPos.z += (tz - p.camPos.z) * follow;
+    p.camPos.y += (height - p.camPos.y) * (1 - Math.pow(1 - 0.25, dt * 60));
   }
   // Lock a constant horizontal follow distance so the car never shrinks /
   // "zooms out" as you accelerate (this was the lag growing with speed).
-  let dx = p.camPos.x - p.pos.x, dz = p.camPos.z - p.pos.z;
+  let dx = p.camPos.x - pos.x, dz = p.camPos.z - pos.z;
   const h = Math.hypot(dx, dz) || 1;
-  p.camPos.x = p.pos.x + (dx / h) * back;
-  p.camPos.z = p.pos.z + (dz / h) * back;
+  p.camPos.x = pos.x + (dx / h) * back;
+  p.camPos.z = pos.z + (dz / h) * back;
 
-  // Subtle shake at high speed.
   const sp = Math.abs(p.speed);
-  let shx = 0, shy = 0;
-  if (sp > 32) { const a = Math.min((sp - 32) / 40, 1) * 0.10; shx = (Math.random() - 0.5) * a; shy = (Math.random() - 0.5) * a; }
-  p.camera.position.set(p.camPos.x + shx, p.camPos.y + shy, p.camPos.z);
+  p.camera.position.copy(p.camPos);
 
   // Gentle dynamic FOV for a sense of speed (small, so the car stays big).
   const targetFov = 60 + Math.min(sp / PHYS.maxSpeed, 1) * 5;
-  p.camera.fov += (targetFov - p.camera.fov) * 0.08;
+  p.camera.fov += (targetFov - p.camera.fov) * (snap ? 1 : 1 - Math.pow(1 - 0.08, dt * 60));
 
   // Look slightly into the corner (at the car's elevation).
-  const rx = Math.cos(p.heading), rz = -Math.sin(p.heading);
-  const lead = p.steerSmooth * 4;
-  p.camera.lookAt(p.pos.x + fx * look + rx * lead, (p.groundY || 0) + 1.4, p.pos.z + fz * look + rz * lead);
+  const rx = Math.cos(heading), rz = -Math.sin(heading);
+  const lead = p.renderSteer * 4;
+  p.camera.lookAt(pos.x + fx * look + rx * lead, pos.y + 1.4, pos.z + fz * look + rz * lead);
 }
 
 function layoutRects(n) {
@@ -814,19 +819,28 @@ const SIM_STEP = 1 / 60;
 const MAX_FRAME = 0.1;
 let last = performance.now();
 let accumulated = 0;
+function updateRace(dt) {
+  accumulated += dt;
+  while (accumulated >= SIM_STEP) {
+    for (const p of G.players.values()) {
+      savePreviousPose(p);
+      updateCar(p, SIM_STEP, G.track, { dropSkid, onGate: updateGates });
+    }
+    handleCollisions();
+    accumulated -= SIM_STEP;
+  }
+  for (const p of G.players.values()) {
+    renderCar(p, accumulated / SIM_STEP);
+    placeCamera(p, false, dt);
+  }
+}
 function loop(now) {
   const dt = Math.min(MAX_FRAME, Math.max(0, (now - last) / 1000));
   last = now;
 
   if (G.state === 'racing') {
-    accumulated += dt;
-    while (accumulated >= SIM_STEP) {
-      for (const p of G.players.values()) updateCar(p, SIM_STEP, G.track, { dropSkid, onGate: updateGates });
-      handleCollisions();
-      accumulated -= SIM_STEP;
-    }
+    updateRace(dt);
     for (const p of G.players.values()) {
-      placeCamera(p);
       emitCarSmoke(p);
       audio.setEngine(p.id, p.rpm, PHYS.redline);
       audio.setSqueal(p.id, p.squeal);
@@ -837,7 +851,7 @@ function loop(now) {
     renderSplit();
   } else if (G.state === 'countdown') {
     accumulated = 0;
-    for (const p of G.players.values()) { placeCamera(p); audio.setEngine(p.id, PHYS.idleRpm, PHYS.redline); }
+    for (const p of G.players.values()) { placeCamera(p, false, dt); audio.setEngine(p.id, PHYS.idleRpm, PHYS.redline); }
     renderSplit();
   } else {
     accumulated = 0;

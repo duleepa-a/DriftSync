@@ -75,13 +75,16 @@ export function updateCar(p, dt, track, { dropSkid, onGate }) {
   p.prevSpeed = p.speed;
   const pitch = clamp(slopePitch + clamp(-accelEst * 0.004, -0.05, 0.05), -0.3, 0.3);
   const bodyRoll = clamp(steer * sp * 0.0016, -0.06, 0.06);
+  p.pitch = pitch;
+  p.roll = -bodyRoll;
   p.mesh.position.set(p.pos.x, p.groundY, p.pos.z);
   p.mesh.rotation.set(pitch, p.heading, -bodyRoll);
 
   const wheels = p.mesh.userData.wheels || [];
   const wroll = p.speed * dt * 1.8;
+  p.wheelSpin = (p.wheelSpin || 0) + wroll;
   for (let i = 0; i < wheels.length; i++) {
-    wheels[i].rotation.x += wroll;
+    wheels[i].rotation.x = p.wheelSpin;
     if (i < 2) wheels[i].rotation.y = steer * 0.4;
   }
   if (p.mesh.userData.brakeMat) {

@@ -34,15 +34,16 @@ app.get('/js/host.js', (_req, res) => {
   // Stop only the scheduled loop, so each test can inspect a completed frame.
   const source = fs.readFileSync(path.join(root, 'public/js/host.js'), 'utf8')
     .replaceAll('requestAnimationFrame(loop);', '')
-    + '\nexport { G, renderer, sceneTarget, addPlayer, spawnCars, renderSplit, renderOverview, layoutHud };';
+    + '\nexport { G, renderer, sceneTarget, addPlayer, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera };';
   res.type('js').send(source);
 });
 app.get('/render-check.mjs', (_req, res) => res.type('js').send(`
-import { G, renderer, addPlayer, spawnCars, renderSplit, renderOverview, layoutHud } from '/js/host.js';
+import { G, renderer, addPlayer, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera } from '/js/host.js';
 const report = document.createElement('pre');
 report.id = 'render-result';
 document.body.appendChild(report);
 const cases = [];
+const motion = [];
 let screenshot;
 function inspectFrame(name, count) {
   const gl = renderer.getContext();
@@ -79,6 +80,31 @@ try {
     await new Promise(requestAnimationFrame);
     renderSplit();
     inspectFrame(count + ' players', count);
+    if (count <= 2) {
+      // Exercise the production fixed-step loop at a display rate above 60 Hz.
+      const players = [...G.players.values()];
+      let previous = players.map(p => p.mesh.position.clone());
+      let stalledFrames = 0, maxCameraOffset = 0;
+      for (let frame = 0; frame < 240; frame++) {
+        updateRace(1 / 120);
+        players.forEach((p, i) => {
+          if (frame > 2 && p.mesh.position.distanceTo(previous[i]) < 1e-8) stalledFrames++;
+          previous[i].copy(p.mesh.position);
+          maxCameraOffset = Math.max(maxCameraOffset, p.camera.position.distanceTo(p.camPos));
+          if (![p.mesh.position.y, p.mesh.rotation.x, p.camera.fov].every(Number.isFinite)) throw new Error('Non-finite race pose');
+        });
+        if (frame === 120 || frame === 239) {
+          renderSplit();
+          inspectFrame(count + ' players accelerating, frame ' + frame, count);
+        }
+      }
+      if (stalledFrames || maxCameraOffset > 1e-9 || players.some(p => p.speed < 32)) {
+        throw new Error('Forward motion jitter: ' + JSON.stringify({ stalledFrames, maxCameraOffset }));
+      }
+      motion.push({ players: count, displayHz: 120, simulatedSeconds: 2, stalledFrames, maxCameraOffset, speeds: players.map(p => p.speed) });
+      spawnCars();
+      renderSplit();
+    }
     if (count === 2) {
       screenshot = renderer.domElement.toDataURL('image/png');
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'b' }));
@@ -95,7 +121,7 @@ try {
       inspectFrame('2 players, resize', 2);
     }
   }
-  report.textContent = JSON.stringify({ devicePixelRatio, cases, screenshot });
+  report.textContent = JSON.stringify({ devicePixelRatio, motion, cases, screenshot });
 } catch (error) { report.textContent = JSON.stringify({ error: error.stack }); }
 await fetch('/render-result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: report.textContent });
 `));
