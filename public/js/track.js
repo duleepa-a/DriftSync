@@ -109,19 +109,28 @@ export function buildTrack(scene) {
   buildGridBoxes(scene, startPositions, tangents[0]);
 
   function nearestInfo(pos, _hint = 0) {
-    // Full search — guarantees we always find the true nearest centerline point
-    // so the wall clamp can never shove the car off onto the grass.
+    // Project onto the continuous centerline instead of snapping to a sample.
+    // Sample snapping made road height (and therefore body pitch) jump forward.
     const N = samples.length;
-    let best = 0, bestD = Infinity;
+    let best = 0, bestD = Infinity, bestT = 0;
     for (let i = 0; i < N; i++) {
-      const d = sqDistXZ(samples[i], pos);
-      if (d < bestD) { bestD = d; best = i; }
+      const a = samples[i], b = samples[(i + 1) % N];
+      const sx = b.x - a.x, sz = b.z - a.z;
+      const t = Math.max(0, Math.min(1, ((pos.x - a.x) * sx + (pos.z - a.z) * sz) / (sx * sx + sz * sz)));
+      const dx = pos.x - a.x - sx * t, dz = pos.z - a.z - sz * t;
+      const d = dx * dx + dz * dz;
+      if (d < bestD) { bestD = d; best = i; bestT = t; }
     }
-    const n = sideNormal(tangents[best]);
-    const dx = pos.x - samples[best].x;
-    const dz = pos.z - samples[best].z;
-    const offset = dx * n.x + dz * n.z;
-    return { index: best, dist: Math.sqrt(bestD), offset, nx: n.x, nz: n.z, groundY: samples[best].y };
+    const next = (best + 1) % N;
+    const a = samples[best], b = samples[next];
+    const tx = THREE.MathUtils.lerp(tangents[best].x, tangents[next].x, bestT);
+    const tz = THREE.MathUtils.lerp(tangents[best].z, tangents[next].z, bestT);
+    const length = Math.hypot(tx, tz);
+    const nx = tz / length, nz = -tx / length;
+    const dx = pos.x - THREE.MathUtils.lerp(a.x, b.x, bestT);
+    const dz = pos.z - THREE.MathUtils.lerp(a.z, b.z, bestT);
+    const offset = dx * nx + dz * nz;
+    return { index: best, dist: Math.sqrt(bestD), offset, nx, nz, groundY: THREE.MathUtils.lerp(a.y, b.y, bestT) };
   }
 
   return { samples, tangents, halfWidth, gates, startPositions, nearestInfo, startLights };
