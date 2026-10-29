@@ -1,8 +1,9 @@
 import * as THREE from 'three';
+import { NITRO } from './nitro.js';
 
 export const PHYS = {
   maxSpeed: 46,
-  accel: 19,
+  accel: 26,
   dragK: 0.004,
   brakeDecel: 55,
   reverseAccel: 16,
@@ -23,16 +24,22 @@ export function updateCar(p, dt, track, { dropSkid, onGate }) {
   p.steerSmooth += (clamp(inp.steer, -1, 1) - p.steerSmooth) * Math.min(1, dt * 12);
   const steer = p.steerSmooth;
   const brake = clamp(inp.brake || 0, 0, 1);
+  if (brake > 0.02 || p.finished) p.nitroTime = 0;
+  const boosting = (p.nitroTime || 0) > 0 && p.speed >= 0;
+  p.nitroTime = Math.max(0, (p.nitroTime || 0) - dt);
+  const speedLimit = boosting ? NITRO.maxSpeed : PHYS.maxSpeed;
 
   if (brake > 0.02) {
     if (p.speed > 0.2) p.speed -= PHYS.brakeDecel * brake * dt;
     else p.speed -= PHYS.reverseAccel * brake * dt;
-  } else {
+  } else if (p.speed <= speedLimit) {
     const drag = PHYS.dragK * p.speed * Math.abs(p.speed);
-    p.speed += (PHYS.accel - drag) * dt;
+    p.speed = Math.min(speedLimit, p.speed + (PHYS.accel + (boosting ? NITRO.extraAccel : 0) - drag) * dt);
+  } else {
+    // Let boost speed bleed off smoothly instead of snapping to the normal cap.
+    p.speed = Math.max(speedLimit, p.speed - NITRO.coastDecel * dt);
   }
-  if (p.speed > PHYS.maxSpeed) p.speed -= (p.speed - PHYS.maxSpeed) * 4 * dt;
-  p.speed = clamp(p.speed, PHYS.reverseMax, PHYS.maxSpeed);
+  p.speed = clamp(p.speed, PHYS.reverseMax, NITRO.maxSpeed);
   const sp = Math.abs(p.speed);
 
   const gearSpan = PHYS.maxSpeed / PHYS.gears;

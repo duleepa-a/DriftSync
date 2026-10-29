@@ -56,6 +56,17 @@ html, body {
 .hud-speed .mph { font-weight: 900; font-size: 64px; line-height: 0.8; }
 .hud-speed .mphlbl { font-weight: 800; font-size: 18px; opacity: 0.9; }
 
+.hud-nitro {
+  position: absolute; left: 14px; bottom: 14px; width: 132px;
+  padding: 9px 12px; border: 1px solid #47e9ff; border-radius: 10px;
+  color: #c8faff; background: rgba(3, 28, 40, 0.94);
+  box-shadow: 0 0 18px rgba(0, 207, 255, 0.25);
+  font-size: 13px; letter-spacing: 0.08em;
+}
+.hud-nitro > div:first-child { display: flex; justify-content: space-between; gap: 10px; }
+.nitro-meter { height: 5px; margin-top: 7px; background: #123d4e; border-radius: 3px; overflow: hidden; }
+.nitro-meter i { display: block; height: 100%; background: #47e9ff; }
+
 /* ---------------- Banner / countdown ---------------- */
 #banner {
   position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;

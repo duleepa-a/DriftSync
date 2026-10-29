@@ -9,11 +9,44 @@ const root = resolve(import.meta.dirname, '..');
 const trackSource = readFileSync(resolve(root, 'public/js/track.js'), 'utf8')
   .replace("from 'three'", `from '${pathToFileURL(resolve(root, 'node_modules/three/build/three.module.js'))}'`);
 const { buildTrack } = await import(`data:text/javascript,${encodeURIComponent(trackSource)}`);
+const nitroSource = readFileSync(resolve(root, 'public/js/nitro.js'), 'utf8');
+const nitroUrl = `data:text/javascript,${encodeURIComponent(nitroSource)}`;
+const { NITRO, createNitroPickups } = await import(nitroUrl);
 const physicsSource = readFileSync(resolve(root, 'public/js/physics.js'), 'utf8')
-  .replace("from 'three'", `from '${pathToFileURL(resolve(root, 'node_modules/three/build/three.module.js'))}'`);
+  .replace("from 'three'", `from '${pathToFileURL(resolve(root, 'node_modules/three/build/three.module.js'))}'`)
+  .replace("from './nitro.js'", `from ${JSON.stringify(nitroUrl)}`);
 const { updateCar } = await import(`data:text/javascript,${encodeURIComponent(physicsSource)}`);
 const motionSource = readFileSync(resolve(root, 'public/js/motion.js'), 'utf8');
 const { resetMotion, savePreviousPose, renderCar } = await import(`data:text/javascript,${encodeURIComponent(motionSource)}`);
+
+test('nitro stations have a full boost of gentle road ahead and stay clear of the grid and walls', () => {
+  const context = new Proxy({}, { get: () => () => {} });
+  globalThis.document = { createElement: () => ({ getContext: () => context }) };
+  const track = buildTrack(new THREE.Scene());
+  const pickups = createNitroPickups(track);
+  const stations = [...new Set(pickups.map(p => p.index))];
+  assert.equal(stations.length, 2, 'the main and back straights should each get a station');
+  assert.equal(pickups.length, stations.length * 3);
+  for (const pickup of pickups) {
+    const road = track.nearestInfo(pickup.pos);
+    assert.ok(Math.abs(road.offset) + NITRO.radius < track.halfWidth - 1.4);
+    for (const spawn of track.startPositions) {
+      assert.ok(Math.hypot(pickup.pos.x - spawn.pos.x, pickup.pos.z - spawn.pos.z) > 30);
+    }
+    let distance = 0, turn = 0, i = pickup.index;
+    while (distance < NITRO.lookAhead) {
+      const j = (i + 1) % track.samples.length;
+      const a = track.samples[i], b = track.samples[j];
+      distance += Math.hypot(b.x - a.x, b.z - a.z);
+      turn += track.tangents[i].angleTo(track.tangents[j]);
+      i = j;
+    }
+    assert.ok(turn <= NITRO.maxTurn, 'pickup must not feed a tight corner');
+    assert.ok(distance > NITRO.maxSpeed * NITRO.duration);
+  }
+  const a = track.samples[stations[0]], b = track.samples[stations[1]];
+  assert.ok(a.distanceTo(b) > 200, 'stations should be spread around the circuit');
+});
 
 test('road height changes continuously between samples, including the lap seam', () => {
   const context = new Proxy({}, { get: () => () => {} });
