@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "test:render": "node scripts/check-rendering.cjs"
   },
   "dependencies": {
     "express": "^4.19.2",

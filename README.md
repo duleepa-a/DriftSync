@@ -26,7 +26,7 @@ The server listens on port 3000 by default. Set `PORT` to change it. If the QR c
 3. Steer with **LEFT** and **RIGHT**. Hold **BRAKE** to slow down; hold it from a stop to reverse. The car accelerates when the brake is released.
 4. Complete three laps. The first car to finish wins.
 
-On a laptop controller tab, use **Left/Right** or **A/D** to steer and **Down**, **S**, or **Space** to brake. Press **M** on the host screen to mute audio or **B** to toggle postprocessing.
+On a laptop controller tab, use **Left/Right** or **A/D** to steer and **Down**, **S**, or **Space** to brake. Audio is temporarily disabled. Press **B** on the host screen to toggle postprocessing.
 
 If a phone cannot connect, check that it is on the same Wi-Fi network and that the laptop firewall allows Node.js on private networks. If the host disconnects, the old room closes; the host creates a new code on reconnect and controllers must join that new room.
 
@@ -59,5 +59,7 @@ The car model and HDR environments are served from `public/assets`. The car fall
 ## Development
 
 Run `npm test` for the multiplayer routing, driving, and lap gate tests. Change driving parameters in `public/js/physics.js`, lap settings in `public/js/race.js`, and track shape in `public/js/track.js`.
+
+Run `npm run test:render` for a headless Chrome check of every player viewport, including toggling effects and resizing. Use `npm run test:render -- --dpr=2` to check high-density displays. The check uses the usual Windows Chrome path; set `CHROME_PATH` for another Chrome installation. It runs an isolated local test server and does not join a live game.
 
 The included Ferrari model and HDR environments come from the Three.js example assets.
