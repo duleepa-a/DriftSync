@@ -62,11 +62,15 @@ Key files:
 | `public/js/audio.js` | Engine and effect audio |
 | `public/js/controller.js` | Phone controls and feedback |
 
-The car model and HDR environments are served from `public/assets`. The car falls back to a procedural model if its glTF file fails to load. For three or four players, bloom is disabled to reduce the cost of rendering several views. Actual frame rate depends on the laptop GPU and display resolution.
+The car model and HDR environments are served from `public/assets`. The car falls back to a procedural model if its glTF file fails to load. Postprocessing runs separately for each player using shared viewport-sized buffers, keeping bloom and nitro blur inside that player's view. Actual frame rate depends on the laptop GPU and display resolution; **B** disables postprocessing on slower devices.
 
 Sunset lighting uses `venice_sunset_1k.hdr`, loaded with `RGBELoader` and filtered with PMREM for `scene.environment`. A matching procedural sunset sky keeps the HDRI's photographed buildings out of the backdrop. A warm directional sun matches the HDRI's 3.3° elevation beyond the treeline. Its faint `DirectionalLightHelper` appears in the lobby overview; adjust `sun.position` and `sun.target` in `buildTrack` to reposition it. Procedural environment lighting remains available if the HDRI cannot load.
 
 ## Development
+
+The renderer uses ACES filmic tone mapping with exposure **1.3** and sRGB output. The HDR pipeline in `public/js/host.js` is `RenderPass -> UnrealBloomPass -> colour grade / nitro blur -> OutputPass`. Bloom uses strength **0.38**, radius **0.45**, and a linear HDR threshold of **1.25**, followed by gentle contrast, saturation, and a per-view vignette. Only the final OutputPass applies tone mapping and colour-space conversion. HDR red brake lamps and emissive grandstand lettering produce halos; ordinary white markings remain below the bloom threshold. Sunset highlights come from the existing HDR environment reflections.
+
+One composer is reused for all cameras, including the lobby. Its buffers resize with the window, pixel ratio (capped at 2), and player layout; the final output uses each player's canvas viewport and scissor. Bloom is available in all four player layouts, with no blur sampling across viewport boundaries.
 
 The road uses `MeshStandardMaterial` with locally generated, seamless PBR textures. Albedo uses sRGB; normal and roughness maps use linear data. Albedo/normal detail tiles every 2 m, while roughness spans the road width once: approximately 0.78 at the centre, gradually rising to 0.94 at the shoulders. The road's environment intensity is 0.8 to balance visible surface detail with subtle sunset reflections on dry asphalt. Adjust these values and `normalScale` in `public/js/road-material.js` to tune the surface.
 

@@ -69,7 +69,9 @@ export function updateCarEffects(p, dt) {
   const pulse = 1 + Math.sin(effects.time * 31) * 0.12;
   for (const jet of effects.flames.children) jet.scale.z = pulse;
   for (const material of p.mesh.userData.brakeMaterials || []) {
-    material.emissiveIntensity = braking ? 1.4 : 0.12;
+    // Saturated red has low luminance: use an HDR emitter so only the lamp
+    // crosses the bloom threshold, rather than making the asphalt bloom too.
+    material.emissiveIntensity = braking ? 6 : 0.12;
   }
   effects.reverseMaterial.emissiveIntensity = reversing ? 3 : 0;
 }

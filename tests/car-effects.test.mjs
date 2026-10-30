@@ -44,7 +44,7 @@ test('red brake lights and white reverse lights follow driving state on both car
     const red = p.mesh.userData.brakeMaterials[0];
     p.input.brake = 1; p.nitroTime = 2;
     updateCarEffects(p, 1 / 60);
-    assert.equal(red.emissiveIntensity, 1.4);
+    assert.equal(red.emissiveIntensity, 6);
     assert.equal(effects.reverseMaterial.emissiveIntensity, 0);
     assert.equal(effects.flames.visible, false);
     p.speed = -2;
