@@ -20,6 +20,7 @@ const skid = new THREE.Vector3();
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 export function updateCar(p, dt, track, { dropSkid, onGate }) {
+  if (p.finished) return;
   const inp = p.input;
   p.steerSmooth += (clamp(inp.steer, -1, 1) - p.steerSmooth) * Math.min(1, dt * 12);
   const steer = p.steerSmooth;

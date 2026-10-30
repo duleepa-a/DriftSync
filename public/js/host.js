@@ -14,7 +14,7 @@ import { PHYS, updateCar } from './physics.js';
 import { resetMotion, savePreviousPose, renderCar } from './motion.js';
 import { NITRO, createNitroPickups, resetNitroPickups, updateNitroPickups } from './nitro.js';
 import { createNitroVisuals } from './nitro-visuals.js';
-import { TOTAL_LAPS, advanceGates, rankings as rankPlayers } from './race.js';
+import { TOTAL_LAPS, advanceGates, recordFinish, allPlayersFinished, rankings as rankPlayers } from './race.js';
 
 /* global io */
 
@@ -38,6 +38,7 @@ const G = {
   raceStart: 0,
   countdownEnd: 0,
   winnerId: null,
+  finishOrder: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -225,6 +226,7 @@ function removePlayer(id) {
   G.players.delete(id);
   if (G.state === 'countdown' || G.state === 'racing') layoutHud();
   updateLobby();
+  checkRaceComplete();
 }
 
 function activePlayers() {
@@ -232,6 +234,8 @@ function activePlayers() {
 }
 
 function spawnCars() {
+  G.finishOrder = [];
+  G.winnerId = null;
   resetNitroPickups(G.nitroPickups);
   nitroVisualTime = 0;
   nitroVisuals.update(0);
@@ -261,6 +265,9 @@ function spawnPlayer(p) {
   p.finished = false;
   p.finishTime = 0;
   p.finishRank = 0;
+  p.lapStartedAt = G.state === 'racing' ? performance.now() - G.raceStart : 0;
+  p.bestLapTime = 0;
+  p.topSpeed = 0;
   p.input = { steer: 0, throttle: 0, brake: 0 };
   p.steerSmooth = 0;
   p.pitch = 0;
@@ -283,24 +290,51 @@ function spawnPlayer(p) {
 // Race state and collision feedback
 // ---------------------------------------------------------------------------
 function updateGates(p, previousX, previousZ) {
-  if (advanceGates(p, G.track.gates, previousX, previousZ)) finishPlayer(p);
+  if (p.finished) return;
+  p.topSpeed = Math.max(p.topSpeed, Math.abs(p.speed));
+  const previousLap = p.lap;
+  const done = advanceGates(p, G.track.gates, previousX, previousZ);
+  const elapsed = performance.now() - G.raceStart;
+  if (p.lap > previousLap) {
+    const lapTime = elapsed - p.lapStartedAt;
+    p.bestLapTime = p.bestLapTime ? Math.min(p.bestLapTime, lapTime) : lapTime;
+    p.lapStartedAt = elapsed;
+  }
+  if (done) finishPlayer(p, elapsed);
 }
 
-function finishPlayer(p) {
-  p.finished = true;
-  p.finishTime = performance.now() - G.raceStart;
-  const alreadyFinished = activePlayers().filter((q) => q.finished && q !== p).length;
-  p.finishRank = alreadyFinished + 1;
-  if (!G.winnerId) {
-    G.winnerId = p.id;
-    showBanner(`${p.name} wins!`, 1600);
-    const epoch = raceEpoch;
-    setTimeout(() => { if (epoch === raceEpoch && G.state === 'racing') endRace(); }, 1700);
-  }
+function finishPlayer(p, elapsed) {
+  if (!recordFinish(p, G.finishOrder, elapsed)) return;
+  if (!G.winnerId) G.winnerId = p.id;
+  p.speed = p.prevSpeed = p.rpm = p.nitroTime = p.nitroVisual = 0;
+  p.squeal = p.skidding = p.offTrack = false;
+  p.input = { steer: 0, throttle: 0, brake: 0 };
+  resetMotion(p);
+  audio.stopVoice(p.id);
+  feedback(p, { place: p.finishRank, speed: 0, lap: TOTAL_LAPS, totalLaps: TOTAL_LAPS, vibrate: 100 });
+  checkRaceComplete();
+}
+
+function checkRaceComplete() {
+  if (G.state !== 'racing') return;
+  const ps = activePlayers();
+  if (allPlayersFinished(ps) || (ps.length === 0 && G.finishOrder.length > 0)) endRace();
+  else if (ps.length === 0) backToLobby();
+}
+
+function placesFor(ranks) {
+  let nextPlace = G.finishOrder.length + 1;
+  return new Map(ranks.map(p => [p.id, p.finished ? p.finishRank : nextPlace++]));
+}
+
+function ordinal(place) {
+  const lastTwo = place % 100;
+  if (lastTwo >= 11 && lastTwo <= 13) return place + 'th';
+  return place + ({ 1: 'st', 2: 'nd', 3: 'rd' }[place % 10] || 'th');
 }
 
 function handleCollisions() {
-  const ps = activePlayers();
+  const ps = activePlayers().filter(p => !p.finished);
   for (let i = 0; i < ps.length; i++) {
     for (let j = i + 1; j < ps.length; j++) {
       const a = ps[i], b = ps[j];
@@ -457,9 +491,29 @@ function layoutHud() {
         <div><strong>NITRO</strong><span data-nitro-time></span></div>
         <div class="nitro-meter"><i data-nitro-bar></i></div>
       </div>
-      <div class="hud-speed"><span class="mph" data-mph>0</span><span class="mphlbl">MPH</span></div>`;
+      <div class="hud-speed"><span class="mph" data-mph>0</span><span class="mphlbl">MPH</span></div>
+      <section class="hud-finish hidden" data-finish aria-label="Your race result">
+        <div class="finish-card">
+          <div class="finish-label">Race finished</div>
+          <h2 class="finish-place" data-finish-place></h2>
+          <div class="finish-name">${escapeHtml(p.name)}</div>
+          <dl class="finish-stats">
+            <div><dt>Race time</dt><dd data-finish-time></dd></div>
+            <div><dt>Best lap</dt><dd data-best-lap></dd></div>
+            <div><dt>Top speed</dt><dd data-top-speed></dd></div>
+          </dl>
+          <p class="finish-waiting" data-finish-waiting></p>
+        </div>
+      </section>`;
     hud.appendChild(cell);
     return {
+      cell,
+      finish: cell.querySelector('[data-finish]'),
+      finishPlace: cell.querySelector('[data-finish-place]'),
+      finishTime: cell.querySelector('[data-finish-time]'),
+      bestLap: cell.querySelector('[data-best-lap]'),
+      topSpeed: cell.querySelector('[data-top-speed]'),
+      waiting: cell.querySelector('[data-finish-waiting]'),
       pos: cell.querySelector('[data-pos]'),
       posden: cell.querySelector('[data-posden]'),
       lap: cell.querySelector('[data-lap]'),
@@ -474,13 +528,14 @@ function layoutHud() {
 
 function updateHud(ps, rects, ranks) {
   if (hudCells.length !== ps.length) layoutHud();
-  const rankOf = new Map(ranks.map((p, idx) => [p.id, idx + 1]));
+  const rankOf = placesFor(ranks);
+  const remaining = ps.filter(p => !p.finished).length;
   const gateCount = G.track.gates.length;
   ps.forEach((p, i) => {
     const c = hudCells[i];
     if (!c) return;
     c.pos.textContent = rankOf.get(p.id) || 1;
-    c.posden.textContent = '|' + ps.length;
+    c.posden.textContent = '|' + (G.finishOrder.length + remaining);
     c.lap.textContent = p.finished ? TOTAL_LAPS : Math.min(p.lap + 1, TOTAL_LAPS);
     // lap progress bar (fraction of gates passed this lap)
     const frac = ((p.nextGate - 1 + gateCount) % gateCount) / gateCount;
@@ -490,6 +545,15 @@ function updateHud(ps, rects, ranks) {
     c.nitro.classList.toggle('hidden', nitroTime <= 0);
     c.nitroTime.textContent = nitroTime.toFixed(1) + 's';
     c.nitroBar.style.width = (nitroTime / NITRO.duration * 100) + '%';
+    c.cell.classList.toggle('is-finished', p.finished);
+    c.finish.classList.toggle('hidden', !p.finished);
+    if (p.finished) {
+      c.finishPlace.textContent = ordinal(p.finishRank) + ' place';
+      c.finishTime.textContent = formatTime(p.finishTime);
+      c.bestLap.textContent = formatTime(p.bestLapTime);
+      c.topSpeed.textContent = Math.round(p.topSpeed * MPH) + ' MPH';
+      c.waiting.textContent = remaining ? `Waiting for ${remaining} racer${remaining === 1 ? '' : 's'} to finish` : 'All racers finished';
+    }
   });
 }
 function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
@@ -552,7 +616,7 @@ socket.on('player:ready', ({ id, ready }) => {
 });
 socket.on('player:input', ({ id, input }) => {
   const p = G.players.get(id);
-  if (p) p.input = input;
+  if (p && !p.finished) p.input = input;
 });
 
 function feedback(p, fb) {
@@ -671,9 +735,10 @@ function startGame() {
 }
 
 function endRace() {
+  if (G.state !== 'racing') return;
   G.state = 'results';
   audio.silenceAll();
-  const ranks = rankings();
+  const ranks = G.finishOrder;
   document.getElementById('resultsTitle').textContent = 'Results';
   document.getElementById('standings').innerHTML = ranks.map((p, i) => {
     const place = i + 1;
@@ -692,6 +757,9 @@ function backToLobby() {
   raceEpoch++;
   G.state = 'lobby';
   G.winnerId = null;
+  G.finishOrder = [];
+  hud.innerHTML = '';
+  hudCells = [];
   resetNitroPickups(G.nitroPickups);
   nitroVisuals.update(0);
   audio.silenceAll();
@@ -707,10 +775,10 @@ function backToLobby() {
 }
 
 function formatTime(ms) {
-  const s = ms / 1000;
-  const m = Math.floor(s / 60);
-  const rem = (s - m * 60).toFixed(2);
-  return `${m}:${rem.padStart(5, '0')}`;
+  const hundredths = Math.round(Math.max(0, ms) / 10);
+  const minutes = Math.floor(hundredths / 6000);
+  const seconds = String(Math.floor(hundredths / 100) % 60).padStart(2, '0');
+  return `${minutes}:${seconds}.${String(hundredths % 100).padStart(2, '0')}`;
 }
 
 socket.on('host:gone', () => {
@@ -846,6 +914,7 @@ function loop(now) {
   if (G.state === 'racing') {
     updateRace(dt);
     for (const p of G.players.values()) {
+      if (p.finished) continue;
       emitCarSmoke(p);
       audio.setEngine(p.id, p.rpm, PHYS.redline);
       audio.setSqueal(p.id, p.squeal);
@@ -876,7 +945,7 @@ function sendFeedback(now) {
   if (now - lastFeedbackTick < 150) return;
   lastFeedbackTick = now;
   const ranks = rankings();
-  const rankOf = new Map(ranks.map((p, idx) => [p.id, idx + 1]));
+  const rankOf = placesFor(ranks);
   for (const p of G.players.values()) {
     feedback(p, {
       offtrack: p.offTrack,

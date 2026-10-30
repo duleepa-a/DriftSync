@@ -24,7 +24,7 @@ The server listens on port 3000 by default. Set `PORT` to change it. If the QR c
 1. Join with one to four controllers.
 2. Press **Start race** on the laptop.
 3. Steer with **LEFT** and **RIGHT**. Hold **BRAKE** to slow down; hold it from a stop to reverse. The car accelerates when the brake is released.
-4. Complete three laps. The first car to finish wins.
+4. Complete three laps. The first car to finish wins, and everyone else keeps racing until they finish. Each finisher's panel shows their place, race time, best lap, and top speed while they wait. The shared results page appears once all remaining racers finish. Finished cars no longer collide with racers; disconnected racers do not hold the race open, and already-recorded finishes remain in the results.
 
 Collect the glowing **N₂O bottles** on the main and back straights for an automatic two-second nitrous boost. Each station has three bottles across the road; a collected bottle returns after eight seconds. Braking cancels the boost. Nitrous raises the speed limit from 46 to 64 m/s (about 103 to 143 mph), then eases back to normal speed. Normal acceleration is 26 m/s².
 
