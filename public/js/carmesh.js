@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { attachCarEffects, disposeCarEffects } from './car-effects.js';
 
 /**
  * Real car model (three.js' Ferrari glTF, Draco-compressed).
@@ -11,7 +12,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
  *
  * The returned Group's +Z faces forward and exposes:
  *   userData.wheels    [front-left, front-right, rear-left, rear-right]
- *   userData.brakeMat  tail-light material (or null)
+ *   userData.brakeMaterials  independently controlled red tail-light materials
  */
 
 let template = null;
@@ -45,7 +46,7 @@ export function createCarMesh(colorHex) {
   const model = template.clone(true);
   model.rotation.y = Math.PI; // model faces -Z; turn it to face our forward (+Z)
 
-  let brakeMat = null;
+  const brakeMaterials = [];
   const ownedMaterials = [];
   model.traverse((o) => {
     if (!o.isMesh || !o.material) return;
@@ -60,11 +61,11 @@ export function createCarMesh(colorHex) {
       ownedMaterials.push(m);
     } else if (name === 'Taillight_Glass') {
       const m = o.material.clone();
-      m.emissive = new THREE.Color(0xff2200);
-      m.emissiveIntensity = 0.4;
+      m.emissive = new THREE.Color(0xff0000);
+      m.emissiveIntensity = 0.12;
       o.material = m;
       ownedMaterials.push(m);
-      brakeMat = m;
+      brakeMaterials.push(m);
     }
   });
 
@@ -75,13 +76,15 @@ export function createCarMesh(colorHex) {
   // steer (Y) before roll (X) so spinning wheels don't twitch when steering
   wheels.forEach((w) => { w.rotation.order = 'YXZ'; });
   outer.userData.wheels = wheels;
-  outer.userData.brakeMat = brakeMat;
+  outer.userData.brakeMaterials = brakeMaterials;
   outer.userData.ownedMaterials = ownedMaterials;
+  attachCarEffects(outer);
   return outer;
 }
 
 export function disposeCarMesh(car) {
   if (!car) return;
+  disposeCarEffects(car);
   if (car.userData.isFallback) {
     const resources = new Set();
     car.traverse((object) => {
@@ -113,7 +116,7 @@ function createFallbackCar(colorHex) {
   const glass = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.5, 2.05), glassMat);
   glass.position.set(0, 1.18, -0.1); car.add(glass);
 
-  const brakeMat = new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0xff0000, emissiveIntensity: 0.4 });
+  const brakeMat = new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0xff0000, emissiveIntensity: 0.12 });
   for (const sx of [-0.6, 0.6]) {
     const bl = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.1), brakeMat);
     bl.position.set(sx, 0.7, -2.12); car.add(bl);
@@ -129,7 +132,8 @@ function createFallbackCar(colorHex) {
     w.position.set(x, 0.55, z); w.rotation.order = 'YXZ'; car.add(w); wheels.push(w);
   }
   car.userData.wheels = wheels;
-  car.userData.brakeMat = brakeMat;
+  car.userData.brakeMaterials = [brakeMat];
   car.userData.isFallback = true;
+  attachCarEffects(car);
   return car;
 }

@@ -6,7 +6,9 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { buildTrack } from './track.js';
+import { createSunsetSky } from './sky.js';
 import { createCarMesh, disposeCarMesh, loadCarAssets } from './carmesh.js';
+import { updateCarEffects } from './car-effects.js';
 import * as audio from './audio.js';
 import { PHYS, updateCar } from './physics.js';
 import { resetMotion, savePreviousPose, renderCar } from './motion.js';
@@ -30,6 +32,7 @@ const G = {
   state: 'lobby', // lobby | countdown | racing | results
   players: new Map(), // socketId -> player
   assetsReady: false, // real car model loaded?
+  environmentReady: false,
   track: null,
   nitroPickups: [],
   raceStart: 0,
@@ -70,12 +73,43 @@ const sceneTarget = new THREE.WebGLRenderTarget(drawingSize.x, drawingSize.y, {
 });
 
 const ColorGradeShader = {
-  uniforms: { tDiffuse: { value: null }, uSat: { value: 1.14 }, uCon: { value: 1.05 }, uVig: { value: 0.34 } },
+  uniforms: {
+    tDiffuse: { value: null }, uSat: { value: 1.14 }, uCon: { value: 1.05 }, uVig: { value: 0.34 },
+    uBoost: { value: new THREE.Vector4() }, uPlayers: { value: 1 },
+    uTexel: { value: new THREE.Vector2(1 / drawingSize.x, 1 / drawingSize.y) },
+  },
   vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
   fragmentShader: `
     uniform sampler2D tDiffuse; uniform float uSat, uCon, uVig; varying vec2 vUv;
+    uniform vec4 uBoost; uniform float uPlayers; uniform vec2 uTexel;
     void main(){
       vec4 t = texture2D(tDiffuse, vUv); vec3 c = t.rgb;
+      vec2 origin = vec2(0.0), size = vec2(1.0);
+      float boost = uBoost.x;
+      if (uPlayers > 1.5) {
+        size.y = 0.5;
+        bool top = vUv.y >= 0.5;
+        origin.y = top ? 0.5 : 0.0;
+        boost = top ? uBoost.x : uBoost.y;
+        if (uPlayers > 2.5) {
+          size.x = 0.5;
+          bool right = vUv.x >= 0.5;
+          origin.x = right ? 0.5 : 0.0;
+          boost = top ? (right ? uBoost.y : uBoost.x) : (right ? uBoost.w : uBoost.z);
+        }
+      }
+      // Radial blur only near this player's edges; keep the car/road centre crisp.
+      vec2 local = (vUv - origin) / size;
+      float amount = boost * smoothstep(0.22, 0.65, length(local - 0.5));
+      if (amount > 0.001) {
+        vec2 ray = (local - 0.5) * size * amount * 0.075;
+        vec3 sum = c;
+        for (int i = 1; i <= 4; i++) {
+          vec2 sampleUv = clamp(vUv - ray * (float(i) / 4.0), origin + uTexel, origin + size - uTexel);
+          sum += texture2D(tDiffuse, sampleUv).rgb;
+        }
+        c = sum / 5.0;
+      }
       float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
       c = mix(vec3(l), c, uSat);            // saturation
       c = (c - 0.5) * uCon + 0.5;           // contrast
@@ -93,29 +127,33 @@ const bloomPass = new UnrealBloomPass(
   1.15   // threshold — only genuine HDR highlights glow, not white surfaces
 );
 composer.addPass(bloomPass);
-composer.addPass(new ShaderPass(ColorGradeShader));
+const colorGradePass = new ShaderPass(ColorGradeShader);
+composer.addPass(colorGradePass);
 composer.addPass(new OutputPass());
 
-// Image-based lighting. Start with a quick procedural sky, then upgrade to a
-// real HDRI environment once it loads (realistic lighting + reflections).
+// Image-based lighting. Keep a matching sky backdrop, then upgrade reflections
+// to the sunset HDRI without introducing its photographed city into the track.
 const pmrem = new THREE.PMREMGenerator(renderer);
-const skyEquirect = makeSkyEnv();
+const skyEquirect = createSunsetSky();
 let environmentTarget = pmrem.fromEquirectangular(skyEquirect);
 scene.environment = environmentTarget.texture;
 scene.background = skyEquirect;
 
-new RGBELoader().load('/assets/sky_day.hdr', (hdr) => {
+new RGBELoader().load('/assets/venice_sunset_1k.hdr', (hdr) => {
   hdr.mapping = THREE.EquirectangularReflectionMapping;
   const nextEnvironment = pmrem.fromEquirectangular(hdr);
+  nextEnvironment.texture.name = 'sunset-environment';
   scene.environment = nextEnvironment.texture;
-  scene.background = scene.environment;
-  scene.backgroundBlurriness = 0.0;
   environmentTarget.dispose();
   environmentTarget = nextEnvironment;
-  skyEquirect.dispose();
   hdr.dispose();
   pmrem.dispose();
-}, undefined, () => pmrem.dispose());
+  G.environmentReady = true;
+}, undefined, (error) => {
+  console.warn('Sunset HDRI failed to load; using the procedural sunset.', error);
+  pmrem.dispose();
+  G.environmentReady = true;
+});
 
 G.track = buildTrack(scene);
 G.nitroPickups = createNitroPickups(G.track);
@@ -126,40 +164,9 @@ nitroVisuals.update(0);
 // Preload the real car model; until it's ready, the Start button waits.
 loadCarAssets().then(() => { G.assetsReady = true; updateLobby(); });
 
-function makeSkyEnv() {
-  const c = document.createElement('canvas');
-  c.width = 1024; c.height = 512;
-  const ctx = c.getContext('2d');
-  // sky
-  const sky = ctx.createLinearGradient(0, 0, 0, 256);
-  sky.addColorStop(0, '#2f6fd0');
-  sky.addColorStop(0.6, '#7fb4ee');
-  sky.addColorStop(1, '#dcefff');
-  ctx.fillStyle = sky; ctx.fillRect(0, 0, 1024, 256);
-  // soft sun glow
-  const glow = ctx.createRadialGradient(720, 90, 10, 720, 90, 220);
-  glow.addColorStop(0, 'rgba(255,250,230,0.95)');
-  glow.addColorStop(1, 'rgba(255,250,230,0)');
-  ctx.fillStyle = glow; ctx.fillRect(400, 0, 624, 300);
-  // a few clouds
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  for (let i = 0; i < 16; i++) {
-    const x = Math.random() * 1024, y = 40 + Math.random() * 150, r = 18 + Math.random() * 34;
-    for (let b = 0; b < 5; b++) ctx.beginPath(), ctx.arc(x + b * r * 0.7 - r, y, r * (0.6 + Math.random() * 0.5), 0, 7), ctx.fill();
-  }
-  // ground
-  const grd = ctx.createLinearGradient(0, 256, 0, 512);
-  grd.addColorStop(0, '#6f9a55');
-  grd.addColorStop(1, '#3f5e34');
-  ctx.fillStyle = grd; ctx.fillRect(0, 256, 1024, 256);
-  const tex = new THREE.CanvasTexture(c);
-  tex.mapping = THREE.EquirectangularReflectionMapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
 // Overview camera for the lobby / attract screen.
 const overview = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 2000);
+overview.layers.enable(1);
 
 window.addEventListener('resize', () => {
   const w = window.innerWidth, h = window.innerHeight;
@@ -167,6 +174,7 @@ window.addEventListener('resize', () => {
   renderer.getDrawingBufferSize(drawingSize);
   sceneTarget.setSize(drawingSize.x, drawingSize.y);
   composer.setSize(w, h);
+  colorGradePass.uniforms.uTexel.value.set(1 / drawingSize.x, 1 / drawingSize.y);
   layoutHud();
 });
 
@@ -248,6 +256,7 @@ function spawnPlayer(p) {
   p.heading = g.heading;
   p.speed = 0;
   p.nitroTime = 0;
+  p.nitroVisual = 0;
   p.prevSpeed = 0;
   p.rpm = 0;
   p.gear = 0;
@@ -270,6 +279,7 @@ function spawnPlayer(p) {
   p.mesh.rotation.set(0, p.heading, 0);
   resetMotion(p);
   renderCar(p, 1);
+  updateCarEffects(p, 0);
 
   // Snap camera behind the car immediately.
   placeCamera(p, true);
@@ -326,7 +336,7 @@ function rankings() {
 
 function placeCamera(p, snap = false, dt = 1 / 60) {
   const pos = p.mesh.position, heading = p.mesh.rotation.y;
-  const back = 5.6, height = pos.y + 2.5, look = 11;
+  const back = 5.6 + (p.nitroVisual || 0) * 0.6, height = pos.y + 2.5, look = 11;
   const fx = Math.sin(heading), fz = Math.cos(heading);
   const tx = pos.x - fx * back, tz = pos.z - fz * back;
 
@@ -339,8 +349,7 @@ function placeCamera(p, snap = false, dt = 1 / 60) {
     p.camPos.z += (tz - p.camPos.z) * follow;
     p.camPos.y += (height - p.camPos.y) * (1 - Math.pow(1 - 0.25, dt * 60));
   }
-  // Lock a constant horizontal follow distance so the car never shrinks /
-  // "zooms out" as you accelerate (this was the lag growing with speed).
+  // Keep distance stable for the current nitro blend, independent of speed lag.
   let dx = p.camPos.x - pos.x, dz = p.camPos.z - pos.z;
   const h = Math.hypot(dx, dz) || 1;
   p.camPos.x = pos.x + (dx / h) * back;
@@ -350,7 +359,7 @@ function placeCamera(p, snap = false, dt = 1 / 60) {
   p.camera.position.copy(p.camPos);
 
   // Gentle dynamic FOV for a sense of speed (small, so the car stays big).
-  const targetFov = 60 + Math.min(sp / PHYS.maxSpeed, 1) * 5;
+  const targetFov = 60 + Math.min(sp / PHYS.maxSpeed, 1) * 5 + (p.nitroVisual || 0) * 5;
   p.camera.fov += (targetFov - p.camera.fov) * (snap ? 1 : 1 - Math.pow(1 - 0.08, dt * 60));
 
   // Look slightly into the corner (at the car's elevation).
@@ -373,6 +382,8 @@ function layoutRects(n) {
 
 function renderSplit() {
   const ps = activePlayers();
+  colorGradePass.uniforms.uPlayers.value = ps.length;
+  colorGradePass.uniforms.uBoost.value.set(...[0, 1, 2, 3].map(i => ps[i]?.nitroVisual || 0));
   bloomPass.enabled = ps.length <= 2;
   const rects = layoutRects(ps.length);
   const H = window.innerHeight;
@@ -418,6 +429,8 @@ function renderSplit() {
 }
 
 function renderOverview(t) {
+  G.track.sunHelper.update();
+  colorGradePass.uniforms.uBoost.value.set(0, 0, 0, 0);
   bloomPass.enabled = true;
   const W = window.innerWidth, H = window.innerHeight;
   if (POST) {
@@ -857,6 +870,7 @@ function updateRace(dt) {
   }
   for (const p of G.players.values()) {
     renderCar(p, accumulated / SIM_STEP);
+    updateCarEffects(p, dt);
     placeCamera(p, false, dt);
   }
   nitroVisualTime += dt;
@@ -879,7 +893,11 @@ function loop(now) {
     renderSplit();
   } else if (G.state === 'countdown') {
     accumulated = 0;
-    for (const p of G.players.values()) { placeCamera(p, false, dt); audio.setEngine(p.id, PHYS.idleRpm, PHYS.redline); }
+    for (const p of G.players.values()) {
+      updateCarEffects(p, dt);
+      placeCamera(p, false, dt);
+      audio.setEngine(p.id, PHYS.idleRpm, PHYS.redline);
+    }
     renderSplit();
   } else {
     accumulated = 0;

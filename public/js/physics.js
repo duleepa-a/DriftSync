@@ -94,9 +94,6 @@ export function updateCar(p, dt, track, { dropSkid, onGate }) {
     wheels[i].rotation.x = p.wheelSpin;
     if (i < 2) wheels[i].rotation.y = steer * 0.4;
   }
-  if (p.mesh.userData.brakeMat) {
-    p.mesh.userData.brakeMat.emissiveIntensity = brake > 0.05 ? 2.6 : 0.4;
-  }
   if (p.skidding && wheels.length >= 4) {
     for (const wi of [2, 3]) { wheels[wi].getWorldPosition(skid); dropSkid(skid.x, skid.z, p.heading, p.groundY); }
   }
