@@ -215,6 +215,22 @@ function buildGrandstands(root, samples, tangents, halfWidth, groundBase) {
   const structureMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, envMapIntensity: 0.7 });
   const nearMaterial = billboardMaterial(crowdTexture(true), true);
   const farMaterial = billboardMaterial(crowdTexture(false), false);
+  // An emissive fascia: only the lettering/stripe exceed the HDR bloom
+  // threshold, leaving the dark board and concrete structure unlit.
+  const signCanvas = document.createElement('canvas');
+  signCanvas.width = 1024; signCanvas.height = 64;
+  const signContext = signCanvas.getContext('2d');
+  signContext.fillStyle = '#0b1219'; signContext.fillRect(0, 0, 1024, 64);
+  signContext.fillStyle = '#e1eff5'; signContext.font = 'bold 40px sans-serif';
+  signContext.textAlign = 'center'; signContext.fillText('DRIFTSYNC  /  PERFORMANCE', 512, 46);
+  signContext.fillStyle = '#64c9e8'; signContext.fillRect(20, 57, 984, 3);
+  const signTexture = new THREE.CanvasTexture(signCanvas);
+  signTexture.colorSpace = THREE.SRGBColorSpace;
+  const signMaterial = new THREE.MeshStandardMaterial({
+    map: signTexture, emissiveMap: signTexture, emissive: 0xffffff,
+    emissiveIntensity: 1.6, roughness: 0.8,
+  });
+  const signGeometry = new THREE.PlaneGeometry(32, 1.5);
   for (const fraction of [0.025, 0.29, 0.54, 0.81]) {
     const index = Math.floor(samples.length * fraction), c = samples[index], t = tangents[index];
     const outward = new THREE.Vector3(t.z, 0, -t.x);
@@ -244,6 +260,11 @@ function buildGrandstands(root, samples, tangents, halfWidth, groundBase) {
       const structure = new THREE.Mesh(standGeometry(level === 0, groundBase, c.y), structureMaterial);
       structure.receiveShadow = true;
       group.add(structure);
+      const sign = new THREE.Mesh(signGeometry, signMaterial);
+      sign.name = 'grandstand-sponsor-board';
+      sign.rotation.y = Math.PI;
+      sign.position.set(0, 11, 3.95);
+      group.add(sign);
       if (level < 2) group.add(crowdMesh(level === 0 ? nearMaterial : farMaterial, level === 1));
       // Three.js updates LOD for each render camera. No hysteresis state shared
       // between a nearby player's viewport and another player's distant view.

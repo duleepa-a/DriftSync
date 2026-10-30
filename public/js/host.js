@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { TexturePass } from 'three/addons/postprocessing/TexturePass.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
@@ -50,7 +50,8 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.92;
+renderer.toneMappingExposure = 1.3;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.setClearColor(0x0b1020, 1);
 renderer.autoClear = false;
 
@@ -58,78 +59,71 @@ const scene = new THREE.Scene();
 
 // ---------------------------------------------------------------------------
 // Post-processing pipeline
-//   Scene is rendered (all split-screen viewports) into an HDR off-screen
-//   target, then bloom + colour-grade + tone-map are applied once full-screen.
-//   Rendering to an off-screen target keeps it linear/HDR; OutputPass does the
-//   final ACES tone-map + sRGB to the canvas.
+//   Each camera runs RenderPass -> HDR bloom -> colour grade -> OutputPass.
+//   Reusing viewport-sized buffers isolates bloom/blur between players and
+//   applies ACES + sRGB exactly once, at the final output to the canvas.
 // ---------------------------------------------------------------------------
 let POST = true;
 const drawingSize = renderer.getDrawingBufferSize(new THREE.Vector2());
-const sceneTarget = new THREE.WebGLRenderTarget(drawingSize.x, drawingSize.y, {
-  type: THREE.HalfFloatType,
-  // Each camera renders into part of this target. Multisample resolves after
-  // every render can invalidate the previous camera's pixels on some GPUs.
-  samples: 0,
-});
 
 const ColorGradeShader = {
   uniforms: {
-    tDiffuse: { value: null }, uSat: { value: 1.14 }, uCon: { value: 1.05 }, uVig: { value: 0.34 },
-    uBoost: { value: new THREE.Vector4() }, uPlayers: { value: 1 },
+    tDiffuse: { value: null }, uSat: { value: 1.06 }, uCon: { value: 1.025 }, uVig: { value: 0.22 },
+    uBoost: { value: new THREE.Vector4() }, uView: { value: 0 },
     uTexel: { value: new THREE.Vector2(1 / drawingSize.x, 1 / drawingSize.y) },
   },
   vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
   fragmentShader: `
     uniform sampler2D tDiffuse; uniform float uSat, uCon, uVig; varying vec2 vUv;
-    uniform vec4 uBoost; uniform float uPlayers; uniform vec2 uTexel;
+    uniform vec4 uBoost; uniform float uView; uniform vec2 uTexel;
     void main(){
       vec4 t = texture2D(tDiffuse, vUv); vec3 c = t.rgb;
-      vec2 origin = vec2(0.0), size = vec2(1.0);
-      float boost = uBoost.x;
-      if (uPlayers > 1.5) {
-        size.y = 0.5;
-        bool top = vUv.y >= 0.5;
-        origin.y = top ? 0.5 : 0.0;
-        boost = top ? uBoost.x : uBoost.y;
-        if (uPlayers > 2.5) {
-          size.x = 0.5;
-          bool right = vUv.x >= 0.5;
-          origin.x = right ? 0.5 : 0.0;
-          boost = top ? (right ? uBoost.y : uBoost.x) : (right ? uBoost.w : uBoost.z);
-        }
-      }
+      float boost = uView < 0.5 ? uBoost.x : (uView < 1.5 ? uBoost.y : (uView < 2.5 ? uBoost.z : uBoost.w));
       // Radial blur only near this player's edges; keep the car/road centre crisp.
-      vec2 local = (vUv - origin) / size;
+      vec2 local = vUv;
       float amount = boost * smoothstep(0.22, 0.65, length(local - 0.5));
       if (amount > 0.001) {
-        vec2 ray = (local - 0.5) * size * amount * 0.075;
+        vec2 ray = (local - 0.5) * amount * 0.075;
         vec3 sum = c;
         for (int i = 1; i <= 4; i++) {
-          vec2 sampleUv = clamp(vUv - ray * (float(i) / 4.0), origin + uTexel, origin + size - uTexel);
+          vec2 sampleUv = clamp(vUv - ray * (float(i) / 4.0), uTexel, vec2(1.0) - uTexel);
           sum += texture2D(tDiffuse, sampleUv).rgb;
         }
         c = sum / 5.0;
       }
       float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
       c = mix(vec3(l), c, uSat);            // saturation
-      c = (c - 0.5) * uCon + 0.5;           // contrast
+      // Contrast around linear middle grey, preserving detail near black.
+      c = 0.18 * pow(max(c, vec3(0.0)) / 0.18, vec3(uCon));
       vec2 d = vUv - 0.5; c *= 1.0 - dot(d, d) * uVig; // vignette
       gl_FragColor = vec4(c, t.a);
     }`,
 };
 
 const composer = new EffectComposer(renderer);
-composer.addPass(new TexturePass(sceneTarget.texture));
+const renderPass = new RenderPass(scene, null); // Camera assigned per viewport.
+composer.addPass(renderPass);
 const bloomPass = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0.22,  // strength (subtle)
-  0.4,   // radius
-  1.15   // threshold — only genuine HDR highlights glow, not white surfaces
+  0.38,  // soft glow around emissive lamps and bright reflections
+  0.45,  // compact halo, keeping the road/car silhouettes crisp
+  1.25   // linear HDR threshold: ordinary white paint does not bloom
 );
 composer.addPass(bloomPass);
 const colorGradePass = new ShaderPass(ColorGradeShader);
 composer.addPass(colorGradePass);
 composer.addPass(new OutputPass());
+let postWidth = window.innerWidth, postHeight = window.innerHeight;
+function setPostSize(width, height) {
+  const ratio = renderer.getPixelRatio();
+  // Equal-sized buffers for both halves, even on odd-pixel-sized displays.
+  const w = Math.ceil(width * ratio) / ratio, h = Math.ceil(height * ratio) / ratio;
+  if (postWidth !== w || postHeight !== h) {
+    composer.setSize(w, h);
+    postWidth = w; postHeight = h;
+  }
+  colorGradePass.uniforms.uTexel.value.set(1 / (w * ratio), 1 / (h * ratio));
+}
 
 // Image-based lighting. Keep a matching sky backdrop, then upgrade reflections
 // to the sunset HDRI without introducing its photographed city into the track.
@@ -170,11 +164,11 @@ overview.layers.enable(1);
 
 window.addEventListener('resize', () => {
   const w = window.innerWidth, h = window.innerHeight;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(w, h);
-  renderer.getDrawingBufferSize(drawingSize);
-  sceneTarget.setSize(drawingSize.x, drawingSize.y);
+  composer.setPixelRatio(renderer.getPixelRatio());
   composer.setSize(w, h);
-  colorGradePass.uniforms.uTexel.value.set(1 / drawingSize.x, 1 / drawingSize.y);
+  postWidth = w; postHeight = h;
   layoutHud();
 });
 
@@ -380,87 +374,56 @@ function layoutRects(n) {
   ].slice(0, Math.max(3, n));
 }
 
-function renderSplit() {
-  const ps = activePlayers();
-  colorGradePass.uniforms.uPlayers.value = ps.length;
-  colorGradePass.uniforms.uBoost.value.set(...[0, 1, 2, 3].map(i => ps[i]?.nitroVisual || 0));
-  bloomPass.enabled = ps.length <= 2;
-  const rects = layoutRects(ps.length);
-  const H = window.innerHeight;
-
-  if (POST) {
-    sceneTarget.viewport.set(0, 0, sceneTarget.width, sceneTarget.height);
-    sceneTarget.scissorTest = false;
-  }
-  renderer.setRenderTarget(POST ? sceneTarget : null);
+function clearFrame() {
+  renderer.setRenderTarget(null);
+  renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
   renderer.setScissorTest(false);
   renderer.clear();
+}
 
-  const ranks = rankings();
-  const pixelRatio = renderer.getPixelRatio();
-  ps.forEach((p, i) => {
-    const r = rects[i];
-    if (!r) return;
-    const y = H - r.y - r.h; // convert top-left to bottom-left origin
-    if (POST) {
-      // Shadow rendering switches render targets. Three.js restores the
-      // target's own viewport and scissor when it switches back.
-      const x0 = Math.round(r.x * pixelRatio), x1 = Math.round((r.x + r.w) * pixelRatio);
-      const y0 = Math.round(y * pixelRatio), y1 = Math.round((y + r.h) * pixelRatio);
-      sceneTarget.viewport.set(x0, y0, x1 - x0, y1 - y0);
-      sceneTarget.scissor.set(x0, y0, x1 - x0, y1 - y0);
-      sceneTarget.scissorTest = true;
-      renderer.setRenderTarget(sceneTarget);
-    } else {
-      renderer.setViewport(r.x, y, r.w, r.h);
-      renderer.setScissor(r.x, y, r.w, r.h);
-      renderer.setScissorTest(true);
-    }
-    p.camera.aspect = r.w / r.h;
-    p.camera.updateProjectionMatrix();
-    renderer.render(scene, p.camera);
-  });
+function renderView(camera, rect, index) {
+  const ratio = renderer.getPixelRatio();
+  const y = window.innerHeight - rect.y - rect.h;
+  const x0 = Math.round(rect.x * ratio), x1 = Math.round((rect.x + rect.w) * ratio);
+  const y0 = Math.round(y * ratio), y1 = Math.round((y + rect.h) * ratio);
+  // These are the CANVAS viewport/scissor. Composer targets have their own
+  // full-buffer viewport, restored automatically after shadow/bloom passes.
+  renderer.setViewport(x0 / ratio, y0 / ratio, (x1 - x0) / ratio, (y1 - y0) / ratio);
+  renderer.setScissor(x0 / ratio, y0 / ratio, (x1 - x0) / ratio, (y1 - y0) / ratio);
+  renderer.setScissorTest(true);
+  camera.aspect = rect.w / rect.h;
+  camera.updateProjectionMatrix();
+  if (POST) {
+    renderPass.camera = camera;
+    colorGradePass.uniforms.uView.value = index;
+    composer.render();
+  } else {
+    renderer.render(scene, camera); // B: inexpensive unprocessed preview.
+  }
+}
 
+function renderSplit() {
+  const ps = activePlayers();
+  colorGradePass.uniforms.uBoost.value.set(...[0, 1, 2, 3].map(i => ps[i]?.nitroVisual || 0));
+  const rects = layoutRects(ps.length);
+  if (POST && rects.length) setPostSize(rects[0].w, rects[0].h);
+  clearFrame();
+  ps.forEach((p, i) => { if (rects[i]) renderView(p.camera, rects[i], i); });
   renderer.setScissorTest(false);
-  sceneTarget.scissorTest = false;
-  presentFrame();
-
-  updateHud(ps, rects, ranks);
+  updateHud(ps, rects, rankings());
 }
 
 function renderOverview(t) {
   G.track.sunHelper.update();
   colorGradePass.uniforms.uBoost.value.set(0, 0, 0, 0);
-  bloomPass.enabled = true;
   const W = window.innerWidth, H = window.innerHeight;
-  if (POST) {
-    sceneTarget.viewport.set(0, 0, sceneTarget.width, sceneTarget.height);
-    sceneTarget.scissorTest = false;
-  }
-  renderer.setRenderTarget(POST ? sceneTarget : null);
-  renderer.setScissorTest(false);
-  renderer.clear();
-  if (!POST) renderer.setViewport(0, 0, W, H);
-  overview.aspect = W / H;
-  overview.updateProjectionMatrix();
+  if (POST) setPostSize(W, H);
   const r = 300, a = t * 0.00008;
   overview.position.set(Math.cos(a) * r, 190, Math.sin(a) * r);
   overview.lookAt(0, 0, 0);
-  renderer.render(scene, overview);
-  presentFrame();
-}
-
-function presentFrame() {
-  renderer.setRenderTarget(null);
-  // OutputPass uses the canvas viewport, which can still be the last player's
-  // rectangle (especially after toggling post-processing). Present the entire
-  // composed image, with no depth left over from direct scene rendering.
-  renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
+  clearFrame();
+  renderView(overview, { x: 0, y: 0, w: W, h: H }, 0);
   renderer.setScissorTest(false);
-  if (POST) {
-    renderer.clear();
-    composer.render();
-  }
 }
 
 // ---------------------------------------------------------------------------

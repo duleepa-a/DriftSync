@@ -10,7 +10,8 @@ const chrome = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Applic
 const scale = process.argv.includes('--dpr=2') ? 2 : 1;
 const app = express();
 let browser, timeout, received = false;
-app.post('/render-result', express.json({ limit: '8mb' }), (req, res) => {
+// High-DPI PNGs contain much more asphalt/forest detail than the 1x captures.
+app.post('/render-result', express.json({ limit: '32mb' }), (req, res) => {
   received = true;
   const report = req.body;
   if (report.screenshot) {
@@ -41,11 +42,11 @@ app.get('/js/host.js', (_req, res) => {
   // Stop only the scheduled loop, so each test can inspect a completed frame.
   const source = fs.readFileSync(path.join(root, 'public/js/host.js'), 'utf8')
     .replaceAll('requestAnimationFrame(loop);', '')
-    + '\nexport { G, scene, renderer, sceneTarget, colorGradePass, addPlayer, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera };';
+    + '\nexport { G, scene, renderer, composer, renderPass, bloomPass, colorGradePass, addPlayer, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera };';
   res.type('js').send(source);
 });
 app.get('/render-check.mjs', (_req, res) => res.type('js').send(`
-import { G, scene, renderer, colorGradePass, addPlayer, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera } from '/js/host.js';
+import { G, scene, renderer, composer, renderPass, bloomPass, colorGradePass, addPlayer, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera } from '/js/host.js';
 import { resetMotion, renderCar } from '/js/motion.js';
 import { updateCarEffects } from '/js/car-effects.js';
 import * as THREE from 'three';
@@ -54,7 +55,7 @@ report.id = 'render-result';
 document.body.appendChild(report);
 const cases = [];
 const motion = [];
-let screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, nitro;
+let screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, nitro, bloom;
 let shaderError;
 renderer.debug.onShaderError = (gl, program, vertex, fragment) => {
   shaderError = [gl.getProgramInfoLog(program), gl.getShaderInfoLog(vertex), gl.getShaderInfoLog(fragment)].join('\\n');
@@ -82,6 +83,44 @@ function inspectFrame(name, count) {
   }
   cases.push({ name, width: w, height: h, views, glError: gl.getError() });
 }
+function checkBloom() {
+  if (renderer.toneMapping !== THREE.ACESFilmicToneMapping || renderer.toneMappingExposure < 1.2 || renderer.toneMappingExposure > 1.5) throw new Error('Incorrect cinematic tone mapping');
+  if (composer.passes[0] !== renderPass || composer.passes[1] !== bloomPass || composer.renderTarget1.texture.type !== THREE.HalfFloatType) throw new Error('RenderPass must feed bloom an HDR buffer');
+  // Exercise the real pipeline: an HDR red lamp must cast a halo while an
+  // ordinary white surface stays below the threshold. No low-threshold wash.
+  const fixture = new THREE.Scene();
+  fixture.background = new THREE.Color(0x000000);
+  const geometry = new THREE.PlaneGeometry(0.16, 0.16);
+  const red = new THREE.MeshBasicMaterial({ color: new THREE.Color().setRGB(6, 0, 0) });
+  const white = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  for (const [x, material] of [[0.55, red], [-0.55, white]]) {
+    const patch = new THREE.Mesh(geometry, material); patch.position.x = x; fixture.add(patch);
+  }
+  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+  camera.position.z = 2;
+  renderPass.scene = fixture; renderPass.camera = camera;
+  const gl = renderer.getContext(), w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+  const captures = [];
+  for (const enabled of [false, true]) {
+    bloomPass.enabled = enabled;
+    renderer.setRenderTarget(null); renderer.setViewport(0, 0, innerWidth, innerHeight);
+    renderer.setScissorTest(false); renderer.clear(); composer.render();
+    const pixels = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels); captures.push(pixels);
+  }
+  function halo(x0, x1) {
+    let delta = 0, count = 0;
+    for (let y = Math.floor(h * 0.47); y < h * 0.53; y++) for (let x = Math.floor(w * x0); x < w * x1; x++) {
+      const i = (y * w + x) * 4; delta += captures[1][i] - captures[0][i]; count++;
+    }
+    return delta / count;
+  }
+  const redHalo = halo(0.825, 0.85), whiteHalo = halo(0.275, 0.30);
+  if (redHalo < 2 || whiteHalo > redHalo * 0.2) throw new Error('Bloom is missing or washing out non-emissive surfaces: ' + JSON.stringify({ redHalo, whiteHalo }));
+  renderPass.scene = scene;
+  geometry.dispose(); red.dispose(); white.dispose();
+  return { exposure: renderer.toneMappingExposure, strength: bloomPass.strength, radius: bloomPass.radius, threshold: bloomPass.threshold, redHalo, whiteHalo };
+}
 try {
   const deadline = performance.now() + 30000;
   while ((!G.assetsReady || !G.environmentReady) && performance.now() < deadline) await new Promise(r => setTimeout(r, 50));
@@ -102,6 +141,7 @@ try {
   const centre = rough.data[(Math.floor(rough.width / 2)) * 4 + 1] / 255;
   const shoulder = rough.data[1] / 255;
   if (centre < 0.7 || centre > 0.85 || shoulder < 0.9 || shoulder - centre < 0.08 || asphalt.metalness !== 0 || asphalt.envMapIntensity > 0.85) throw new Error('Dry asphalt must retain subtle wear without a glossy reflection stripe');
+  bloom = checkBloom();
   renderOverview(0);
   document.getElementById('lobby').classList.add('hidden');
   for (let count = 1; count <= 4; count++) {
@@ -111,6 +151,7 @@ try {
     await new Promise(requestAnimationFrame);
     renderSplit();
     inspectFrame(count + ' players', count);
+    if (!bloomPass.enabled || renderPass.camera !== [...G.players.values()].at(-1).camera) throw new Error('Composer did not render bloom for every player');
     if (count === 1) sceneryScreenshot = renderer.domElement.toDataURL('image/png');
     if (count <= 2) {
       // Exercise the production fixed-step loop at a display rate above 60 Hz.
@@ -151,6 +192,17 @@ try {
       await new Promise(requestAnimationFrame);
       renderSplit();
       inspectFrame('2 players, resize', 2);
+      const widthDescriptor = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+      const heightDescriptor = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+      const resizedWidth = innerWidth - 78, resizedHeight = innerHeight - 46;
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: resizedWidth });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: resizedHeight });
+      window.dispatchEvent(new Event('resize')); renderSplit();
+      inspectFrame('2 players, changed window dimensions', 2);
+      if (composer.readBuffer.width !== Math.ceil(resizedWidth * renderer.getPixelRatio()) || composer.readBuffer.height !== Math.ceil(resizedHeight * renderer.getPixelRatio() / 2)) throw new Error('Composer did not resize to the player viewport');
+      Object.defineProperty(window, 'innerWidth', widthDescriptor);
+      Object.defineProperty(window, 'innerHeight', heightDescriptor);
+      window.dispatchEvent(new Event('resize')); renderSplit();
 
       const players = [...G.players.values()];
       // Approach separate bottles on the back straight using real physics.
@@ -182,7 +234,7 @@ try {
       updateRace(1 / 60); renderSplit();
       if (players[0].nitroTime !== 0 || !indicators[0].classList.contains('hidden') || players[1].nitroTime <= 0) throw new Error('Braking must cancel nitro for that player only');
       if (players[0].mesh.userData.effects.flames.visible || !players[1].mesh.userData.effects.flames.visible) throw new Error('Flames leaked between players');
-      if (players[0].mesh.userData.brakeMaterials.some(m => m.emissiveIntensity !== 1.4)) throw new Error('Brake lights did not turn red');
+      if (players[0].mesh.userData.brakeMaterials.some(m => m.emissiveIntensity !== 6)) throw new Error('Brake lights did not turn red');
       if (colorGradePass.uniforms.uBoost.value.x >= colorGradePass.uniforms.uBoost.value.y) throw new Error('Blur is not independent per viewport');
       for (let frame = 0; frame < 500; frame++) updateRace(1 / 60);
       if (bottles.some(p => p.cooldown !== 0 || !scene.getObjectByName('nitro-' + p.id).visible)) throw new Error('Nitro did not respawn');
@@ -216,7 +268,7 @@ try {
   const forest = scene.getObjectByName('instanced-pine-forest');
   const stands = scene.getObjectByName('track-scenery').children.filter(child => child.isLOD);
   const scenery = { trees: forest.count, forestTriangles: forest.count * forest.geometry.attributes.position.count / 3, grandstands: stands.length };
-  report.textContent = JSON.stringify({ devicePixelRatio, motion, nitro, scenery, cases, screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot });
+  report.textContent = JSON.stringify({ devicePixelRatio, motion, nitro, bloom, scenery, cases, screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot });
 } catch (error) { report.textContent = JSON.stringify({ error: error.stack }); }
 await fetch('/render-result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: report.textContent });
 `));
