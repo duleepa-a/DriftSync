@@ -9,9 +9,13 @@ const root = resolve(import.meta.dirname, '..');
 const roadSource = readFileSync(resolve(root, 'public/js/road-material.js'), 'utf8')
   .replace("from 'three'", `from '${pathToFileURL(resolve(root, 'node_modules/three/build/three.module.js'))}'`);
 const roadUrl = `data:text/javascript,${encodeURIComponent(roadSource)}`;
+const scenerySource = readFileSync(resolve(root, 'public/js/scenery.js'), 'utf8')
+  .replace("from 'three'", `from '${pathToFileURL(resolve(root, 'node_modules/three/build/three.module.js'))}'`);
+const sceneryUrl = `data:text/javascript,${encodeURIComponent(scenerySource)}`;
 const trackSource = readFileSync(resolve(root, 'public/js/track.js'), 'utf8')
   .replace("from 'three'", `from '${pathToFileURL(resolve(root, 'node_modules/three/build/three.module.js'))}'`)
-  .replace("from './road-material.js'", `from ${JSON.stringify(roadUrl)}`);
+  .replace("from './road-material.js'", `from ${JSON.stringify(roadUrl)}`)
+  .replace("from './scenery.js'", `from ${JSON.stringify(sceneryUrl)}`);
 const { buildTrack } = await import(`data:text/javascript,${encodeURIComponent(trackSource)}`);
 const nitroSource = readFileSync(resolve(root, 'public/js/nitro.js'), 'utf8');
 const nitroUrl = `data:text/javascript,${encodeURIComponent(nitroSource)}`;
@@ -22,6 +26,43 @@ const physicsSource = readFileSync(resolve(root, 'public/js/physics.js'), 'utf8'
 const { updateCar } = await import(`data:text/javascript,${encodeURIComponent(physicsSource)}`);
 const motionSource = readFileSync(resolve(root, 'public/js/motion.js'), 'utf8');
 const { resetMotion, savePreviousPose, renderCar } = await import(`data:text/javascript,${encodeURIComponent(motionSource)}`);
+
+test('forest and grandstands clear the road, and scenery LOD resets for each camera', () => {
+  const context = new Proxy({}, { get: () => () => {} });
+  globalThis.document = { createElement: () => ({ getContext: () => context }) };
+  const scene = new THREE.Scene(), track = buildTrack(scene);
+  const forest = scene.getObjectByName('instanced-pine-forest');
+  assert.ok(forest.isInstancedMesh && forest.count >= 700);
+  assert.equal(forest.geometry.groups.length, 0, 'all tree parts must use one draw call');
+  assert.ok(!Array.isArray(forest.material));
+  assert.ok(forest.count * forest.geometry.attributes.position.count / 3 < 150000);
+  const matrix = new THREE.Matrix4(), position = new THREE.Vector3();
+  for (let i = 0; i < forest.count; i++) {
+    forest.getMatrixAt(i, matrix);
+    position.setFromMatrixPosition(matrix);
+    const road = track.nearestInfo(position);
+    assert.ok(road.dist >= track.halfWidth + 18, 'trees must clear every road segment');
+    const blend = THREE.MathUtils.clamp((road.dist - track.halfWidth - 16) / 64, 0, 1);
+    assert.ok(Math.abs(position.y - (THREE.MathUtils.lerp(road.groundY, -16, blend) - 0.15)) < 0.001);
+  }
+  scene.updateMatrixWorld(true);
+  const stands = scene.getObjectByName('track-scenery').children.filter(child => child.isLOD);
+  assert.equal(stands.length, 4, 'all four designated spectator areas must fit');
+  const camera = new THREE.PerspectiveCamera();
+  for (const stand of stands) {
+    for (const x of [-24, 0, 24]) for (const z of [-1, 6, 14]) {
+      const corner = new THREE.Vector3(x, 0, z).applyMatrix4(stand.matrixWorld);
+      assert.ok(track.nearestInfo(corner).dist >= track.halfWidth + 7, 'stand footprint must clear the barrier');
+    }
+    for (const [distance, level] of [[50, 0], [250, 1], [500, 2], [50, 0]]) {
+      camera.position.copy(stand.position).add(new THREE.Vector3(0, 0, distance));
+      camera.updateMatrixWorld(true);
+      stand.update(camera);
+      assert.equal(stand.getCurrentLevel(), level);
+      assert.equal(stand.children.filter(child => child.visible).length, 1);
+    }
+  }
+});
 
 test('nitro stations have a full boost of gentle road ahead and stay clear of the grid and walls', () => {
   const context = new Proxy({}, { get: () => () => {} });

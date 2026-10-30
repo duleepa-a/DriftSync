@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import { createRoadMaterial } from './road-material.js';
+import { buildTrackScenery } from './scenery.js';
 
 /**
  * Builds the world: ground, lights, a wide closed race circuit with continuous
  * walls (no gaps) and red/white kerbs, lane markings, start/finish line, and
- * scenery (trees + distant hills).
+ * scenery (instanced pines, billboard crowds, and mountain ridges).
  *
  * Returns data the host uses for physics & lap logic:
  *   {
@@ -112,8 +113,7 @@ export function buildTrack(scene) {
   buildStartLine(scene, samples, tangents, halfWidth);
 
   // ---------- Scenery ----------
-  buildScenery(scene, samples, halfWidth, terrainHeight);
-  buildHills(scene, groundBase);
+  buildTrackScenery(scene, samples, tangents, halfWidth, terrainHeight, groundBase);
   buildTireBarriers(scene, samples, tangents, halfWidth);
 
   // ---------- Lap gates ----------
@@ -158,7 +158,6 @@ export function buildTrack(scene) {
 // ----------------------------------------------------------------------------
 // Geometry helpers
 // ----------------------------------------------------------------------------
-function sqDistXZ(a, b) { const dx = a.x - b.x, dz = a.z - b.z; return dx * dx + dz * dz; }
 function sideNormal(t) { return new THREE.Vector3(t.z, 0, -t.x).normalize(); }
 
 // A flat ribbon following the track, from lateral offset oA to oB.
@@ -402,59 +401,6 @@ function buildStartLine(scene, samples, tangents, halfWidth) {
   strip.name = 'start-finish-line';
   strip.receiveShadow = true;
   scene.add(strip);
-}
-
-function buildScenery(scene, samples, halfWidth, terrainHeight) {
-  const trunkGeo = new THREE.CylinderGeometry(0.5, 0.8, 5, 6);
-  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5b4129, roughness: 1 });
-  const leafGeo = new THREE.IcosahedronGeometry(4.2, 0); // faceted low-poly canopy
-  const leafMat = new THREE.MeshStandardMaterial({ color: 0x357a32, roughness: 0.9, flatShading: true });
-
-  const COUNT = 160;
-  const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, COUNT);
-  const leaves = new THREE.InstancedMesh(leafGeo, leafMat, COUNT);
-  trunks.castShadow = leaves.castShadow = true;
-  const m = new THREE.Matrix4(), q = new THREE.Quaternion();
-  let n = 0, guard = 0;
-  while (n < COUNT && guard < COUNT * 40) {
-    guard++;
-    const x = (Math.random() - 0.5) * 1300;
-    const z = (Math.random() - 0.5) * 1300;
-    const p = new THREE.Vector3(x, 0, z);
-    // nearest sample (for both the keep-off-road test and the ground height)
-    let nearD2 = Infinity, sy = 0;
-    for (let i = 0; i < samples.length; i += 4) {
-      const d2 = sqDistXZ(samples[i], p);
-      if (d2 < nearD2) { nearD2 = d2; sy = samples[i].y; }
-    }
-    if (nearD2 < (halfWidth + 16) ** 2) continue; // keep trees off the track
-    const gy = terrainHeight(Math.sqrt(nearD2), sy);
-    const sc = 0.7 + Math.random() * 1.2;
-    m.compose(new THREE.Vector3(x, gy + 2.5 * sc, z), q, new THREE.Vector3(sc, sc, sc));
-    trunks.setMatrixAt(n, m);
-    m.compose(new THREE.Vector3(x, gy + 7.5 * sc, z), q, new THREE.Vector3(sc, sc * 1.1, sc));
-    leaves.setMatrixAt(n, m);
-    n++;
-  }
-  trunks.count = leaves.count = n;
-  trunks.instanceMatrix.needsUpdate = leaves.instanceMatrix.needsUpdate = true;
-  scene.add(trunks, leaves);
-}
-
-function buildHills(scene, groundBase) {
-  const geo = new THREE.IcosahedronGeometry(1, 0);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x6f8f5f, roughness: 1, flatShading: true });
-  const inst = new THREE.InstancedMesh(geo, mat, 18);
-  const m = new THREE.Matrix4(), q = new THREE.Quaternion();
-  for (let i = 0; i < 18; i++) {
-    const a = (i / 18) * Math.PI * 2 + Math.random() * 0.2;
-    const r = 560 + Math.random() * 120;
-    const sx = 80 + Math.random() * 90, sy = 35 + Math.random() * 40;
-    m.compose(new THREE.Vector3(Math.cos(a) * r, groundBase + sy * 0.2, Math.sin(a) * r), q, new THREE.Vector3(sx, sy, sx));
-    inst.setMatrixAt(i, m);
-  }
-  inst.instanceMatrix.needsUpdate = true;
-  scene.add(inst);
 }
 
 // Stacks of tires lining the inside of the walls (decorative).

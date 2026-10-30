@@ -56,6 +56,7 @@ Key files:
 | `public/js/nitro-visuals.js` | Glowing bottle and road-ring visuals |
 | `public/js/race.js` | Lap gate progress and rankings |
 | `public/js/track.js` | Track geometry, scenery, and gate locations |
+| `public/js/scenery.js` | Instanced pine forest, crowd billboards, grandstand LOD, and mountain ridges |
 | `public/js/road-material.js` | Asphalt albedo, normal, and racing-line roughness maps |
 | `public/js/carmesh.js` | Car asset loading, cloning, and disposal |
 | `public/js/audio.js` | Engine and effect audio |
@@ -68,6 +69,10 @@ Sunset lighting uses `venice_sunset_1k.hdr`, loaded with `RGBELoader` and filter
 ## Development
 
 The road uses `MeshStandardMaterial` with locally generated, seamless PBR textures. Albedo uses sRGB; normal and roughness maps use linear data. Albedo/normal detail tiles every 2 m, while roughness spans the road width once: approximately 0.78 at the centre, gradually rising to 0.94 at the shoulders. The road's environment intensity is 0.8 to balance visible surface detail with subtle sunset reflections on dry asphalt. Adjust these values and `normalScale` in `public/js/road-material.js` to tune the surface.
+
+Track scenery is generated locally in `public/js/scenery.js`. Four rows of pines follow each side of the circuit; trunks and foliage are merged into a single vertex-coloured `InstancedMesh`, with no forest shadow pass. Placement checks the complete road and reserves space around the grandstands. Two continuous mountain ridges add a hazy, layered horizon behind the forest while retaining the sunset clouds.
+
+The four grandstands use a generated transparent 4-by-2 spectator atlas. Instanced crowd planes face the current render camera in the vertex shader, so each split-screen view gets the correct orientation without a JavaScript update per spectator. Alpha testing and depth writes prevent transparent row-sorting artifacts. Each stand switches from 288 individual billboards to 12 crowd patches at 180 m, then hides the crowd at 420 m; distant structures also omit rail details. Three.js updates this LOD separately for each camera. Adjust the placement fractions, row spacing, and LOD distances in the scenery module. These draw-call savings are structural; actual frame rate still depends on hardware.
 
 Run `npm test` for the multiplayer routing, driving, and lap gate tests. Change driving parameters in `public/js/physics.js`, lap settings in `public/js/race.js`, and track shape in `public/js/track.js`.
 

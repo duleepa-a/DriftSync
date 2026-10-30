@@ -19,7 +19,7 @@ app.post('/render-result', express.json({ limit: '8mb' }), (req, res) => {
     delete report.screenshot;
     report.screenshotPath = screenshotPath;
   }
-  for (const key of ['nitroScreenshot', 'boostScreenshot', 'brakeReverseScreenshot']) {
+  for (const key of ['nitroScreenshot', 'boostScreenshot', 'brakeReverseScreenshot', 'sceneryScreenshot']) {
     if (!report[key]) continue;
     const screenshotPath = path.join(os.tmpdir(), 'driftsync-' + key + '-dpr' + scale + '.png');
     fs.writeFileSync(screenshotPath, Buffer.from(report[key].split(',')[1], 'base64'));
@@ -54,8 +54,13 @@ report.id = 'render-result';
 document.body.appendChild(report);
 const cases = [];
 const motion = [];
-let screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, nitro;
+let screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, nitro;
+let shaderError;
+renderer.debug.onShaderError = (gl, program, vertex, fragment) => {
+  shaderError = [gl.getProgramInfoLog(program), gl.getShaderInfoLog(vertex), gl.getShaderInfoLog(fragment)].join('\\n');
+};
 function inspectFrame(name, count) {
+  if (shaderError) throw new Error('Shader compilation failed: ' + shaderError);
   const gl = renderer.getContext();
   const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
   const pixels = new Uint8Array(w * h * 4);
@@ -106,6 +111,7 @@ try {
     await new Promise(requestAnimationFrame);
     renderSplit();
     inspectFrame(count + ' players', count);
+    if (count === 1) sceneryScreenshot = renderer.domElement.toDataURL('image/png');
     if (count <= 2) {
       // Exercise the production fixed-step loop at a display rate above 60 Hz.
       const players = [...G.players.values()];
@@ -207,7 +213,10 @@ try {
       }
     }
   }
-  report.textContent = JSON.stringify({ devicePixelRatio, motion, nitro, cases, screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot });
+  const forest = scene.getObjectByName('instanced-pine-forest');
+  const stands = scene.getObjectByName('track-scenery').children.filter(child => child.isLOD);
+  const scenery = { trees: forest.count, forestTriangles: forest.count * forest.geometry.attributes.position.count / 3, grandstands: stands.length };
+  report.textContent = JSON.stringify({ devicePixelRatio, motion, nitro, scenery, cases, screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot });
 } catch (error) { report.textContent = JSON.stringify({ error: error.stack }); }
 await fetch('/render-result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: report.textContent });
 `));
