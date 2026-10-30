@@ -12,21 +12,38 @@ import * as THREE from 'three';
  *   }
  */
 export function buildTrack(scene) {
-  scene.fog = new THREE.Fog(0xbcd3e8, 320, 760);
+  scene.fog = new THREE.Fog(0xc79b86, 320, 900);
 
   // ---------- Lights ----------
-  const hemi = new THREE.HemisphereLight(0xcfe6ff, 0x586b45, 0.55);
+  const hemi = new THREE.HemisphereLight(0xaebbd2, 0x665044, 0.5);
   scene.add(hemi);
 
-  const sun = new THREE.DirectionalLight(0xfff2da, 2.6);
-  sun.position.set(160, 240, 120);
+  const sun = new THREE.DirectionalLight(0xffb36b, 2.2);
+  sun.name = 'sunset-sun';
+  // Match the bright sun in venice_sunset_1k.hdr: azimuth 36°, elevation 3.3°.
+  // A distance of 1000 m puts the source beyond the surrounding trees.
+  sun.position.set(807.28, 58.26, 587.28);
+  sun.target.position.set(0, 0, 0);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   const s = sun.shadow.camera;
   s.left = -320; s.right = 320; s.top = 320; s.bottom = -320;
-  s.near = 10; s.far = 720;
-  sun.shadow.bias = -0.0003;
-  scene.add(sun);
+  s.near = 100; s.far = 1500;
+  sun.shadow.bias = -0.0001;
+  sun.shadow.normalBias = 0.05;
+  scene.add(sun, sun.target);
+
+  const sunHelper = new THREE.DirectionalLightHelper(sun, 8, 0xffc58a);
+  sunHelper.name = 'sunset-sun-helper';
+  sunHelper.traverse(object => {
+    object.layers.set(1); // Positioning guide in the overview camera only.
+    if (object.material) {
+      object.material.transparent = true;
+      object.material.opacity = 0.16;
+      object.material.depthWrite = false;
+    }
+  });
+  scene.add(sunHelper);
 
   const groundBase = -16; // far flat ground level (below lowest track point)
 
@@ -89,7 +106,7 @@ export function buildTrack(scene) {
   const startLights = buildStartGantry(scene, samples[0], tangents[0], halfWidth);
 
   buildLaneDashes(scene, samples, tangents);
-  buildStartLine(scene, samples[0], tangents[0], halfWidth);
+  buildStartLine(scene, samples, tangents, halfWidth);
 
   // ---------- Scenery ----------
   buildScenery(scene, samples, halfWidth, terrainHeight);
@@ -132,7 +149,7 @@ export function buildTrack(scene) {
     return { index: best, dist: Math.sqrt(bestD), offset, nx, nz, groundY: THREE.MathUtils.lerp(a.y, b.y, bestT) };
   }
 
-  return { samples, tangents, halfWidth, gates, startPositions, nearestInfo, startLights };
+  return { samples, tangents, halfWidth, gates, startPositions, nearestInfo, startLights, sun, sunHelper };
 }
 
 // ----------------------------------------------------------------------------
@@ -334,6 +351,7 @@ function buildLaneDashes(scene, samples, tangents) {
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
   let count = 0;
   for (let i = 0; i < N; i += step) {
+    if (i === 0) continue; // Keep the centre dash out of the checker strip.
     const t = tangents[i];
     q.setFromAxisAngle(up, Math.atan2(t.x, t.z));
     m.compose(new THREE.Vector3(samples[i].x, samples[i].y + 0.07, samples[i].z), q, new THREE.Vector3(1, 1, 1));
@@ -344,28 +362,43 @@ function buildLaneDashes(scene, samples, tangents) {
   scene.add(inst);
 }
 
-function buildStartLine(scene, center, tangent, halfWidth) {
-  const n = sideNormal(tangent);
-  const squares = 20;
-  const sq = (halfWidth * 2) / squares;
-  const geo = new THREE.PlaneGeometry(sq, sq * 2);
-  const white = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 });
-  const black = new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.6 });
-  const group = new THREE.Group();
-  for (let i = 0; i < squares; i++) {
-    for (let row = 0; row < 2; row++) {
-      const tile = new THREE.Mesh(geo, (i + row) % 2 === 0 ? white : black);
-      tile.rotation.x = -Math.PI / 2;
-      const along = (row - 0.5) * sq * 2;
-      const across = -halfWidth + sq / 2 + i * sq;
-      tile.position.set(
-        center.x + n.x * across + tangent.x * along, center.y + 0.08,
-        center.z + n.z * across + tangent.z * along
-      );
-      group.add(tile);
+function buildStartLine(scene, samples, tangents, halfWidth) {
+  // Reuse the road's two triangles on either side of the start gate, rather
+  // than overlapping world-aligned tiles. This also follows the road's slope.
+  const positions = [], uvs = [];
+  [samples.length - 1, 0, 1].forEach((index, row) => {
+    const c = samples[index], n = sideNormal(tangents[index]);
+    for (const side of [-1, 1]) {
+      positions.push(c.x + n.x * halfWidth * side, c.y + 0.045, c.z + n.z * halfWidth * side);
+      uvs.push((side + 1) / 2, row / 2);
     }
-  }
-  scene.add(group);
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex([0, 3, 1, 0, 2, 3, 2, 5, 3, 2, 4, 5]);
+  geo.computeVertexNormals();
+  const texture = canvasTexture(1024, 128, ctx => {
+    const inset = 1024 * 1.6 / (halfWidth * 2); // Leave the kerbs uncovered.
+    const squareWidth = (1024 - inset * 2) / 16;
+    for (let row = 0; row < 2; row++) {
+      for (let column = 0; column < 16; column++) {
+        ctx.fillStyle = (row + column) % 2 === 0 ? '#f4f4f4' : '#141414';
+        const left = Math.round(inset + column * squareWidth);
+        const right = Math.round(inset + (column + 1) * squareWidth);
+        ctx.fillRect(left, row * 64, right - left, 64);
+      }
+    }
+  });
+  texture.anisotropy = 8;
+  const material = new THREE.MeshStandardMaterial({
+    map: texture, transparent: true, alphaTest: 0.5, roughness: 0.9,
+    depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+  });
+  const strip = new THREE.Mesh(geo, material);
+  strip.name = 'start-finish-line';
+  strip.receiveShadow = true;
+  scene.add(strip);
 }
 
 function buildScenery(scene, samples, halfWidth, terrainHeight) {

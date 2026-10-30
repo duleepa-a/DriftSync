@@ -78,8 +78,15 @@ function inspectFrame(name, count) {
 }
 try {
   const deadline = performance.now() + 30000;
-  while (!G.assetsReady && performance.now() < deadline) await new Promise(r => setTimeout(r, 50));
+  while ((!G.assetsReady || !G.environmentReady) && performance.now() < deadline) await new Promise(r => setTimeout(r, 50));
   if (!G.assetsReady) throw new Error('Car assets did not load');
+  if (!G.environmentReady || scene.environment?.name !== 'sunset-environment') throw new Error('Sunset HDRI did not load');
+  if (!scene.background?.isTexture || scene.background === scene.environment) throw new Error('Matching sunset sky backdrop is missing');
+  const { sun, sunHelper } = G.track;
+  const sunDirection = sun.position.clone().sub(sun.target.position);
+  const elevation = Math.atan2(sunDirection.y, Math.hypot(sunDirection.x, sunDirection.z)) * 180 / Math.PI;
+  if (elevation < 2 || elevation > 6 || sun.position.length() < 900) throw new Error('Sun is not low behind the treeline');
+  if (sunHelper.light !== sun || sunHelper.lightPlane.material.opacity > 0.2 || sunHelper.layers.mask !== 2) throw new Error('Sun positioning helper is missing or too prominent');
   renderOverview(0);
   document.getElementById('lobby').classList.add('hidden');
   for (let count = 1; count <= 4; count++) {

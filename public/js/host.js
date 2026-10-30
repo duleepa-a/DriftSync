@@ -6,6 +6,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { buildTrack } from './track.js';
+import { createSunsetSky } from './sky.js';
 import { createCarMesh, disposeCarMesh, loadCarAssets } from './carmesh.js';
 import { updateCarEffects } from './car-effects.js';
 import * as audio from './audio.js';
@@ -31,6 +32,7 @@ const G = {
   state: 'lobby', // lobby | countdown | racing | results
   players: new Map(), // socketId -> player
   assetsReady: false, // real car model loaded?
+  environmentReady: false,
   track: null,
   nitroPickups: [],
   raceStart: 0,
@@ -129,26 +131,29 @@ const colorGradePass = new ShaderPass(ColorGradeShader);
 composer.addPass(colorGradePass);
 composer.addPass(new OutputPass());
 
-// Image-based lighting. Start with a quick procedural sky, then upgrade to a
-// real HDRI environment once it loads (realistic lighting + reflections).
+// Image-based lighting. Keep a matching sky backdrop, then upgrade reflections
+// to the sunset HDRI without introducing its photographed city into the track.
 const pmrem = new THREE.PMREMGenerator(renderer);
-const skyEquirect = makeSkyEnv();
+const skyEquirect = createSunsetSky();
 let environmentTarget = pmrem.fromEquirectangular(skyEquirect);
 scene.environment = environmentTarget.texture;
 scene.background = skyEquirect;
 
-new RGBELoader().load('/assets/sky_day.hdr', (hdr) => {
+new RGBELoader().load('/assets/venice_sunset_1k.hdr', (hdr) => {
   hdr.mapping = THREE.EquirectangularReflectionMapping;
   const nextEnvironment = pmrem.fromEquirectangular(hdr);
+  nextEnvironment.texture.name = 'sunset-environment';
   scene.environment = nextEnvironment.texture;
-  scene.background = scene.environment;
-  scene.backgroundBlurriness = 0.0;
   environmentTarget.dispose();
   environmentTarget = nextEnvironment;
-  skyEquirect.dispose();
   hdr.dispose();
   pmrem.dispose();
-}, undefined, () => pmrem.dispose());
+  G.environmentReady = true;
+}, undefined, (error) => {
+  console.warn('Sunset HDRI failed to load; using the procedural sunset.', error);
+  pmrem.dispose();
+  G.environmentReady = true;
+});
 
 G.track = buildTrack(scene);
 G.nitroPickups = createNitroPickups(G.track);
@@ -159,40 +164,9 @@ nitroVisuals.update(0);
 // Preload the real car model; until it's ready, the Start button waits.
 loadCarAssets().then(() => { G.assetsReady = true; updateLobby(); });
 
-function makeSkyEnv() {
-  const c = document.createElement('canvas');
-  c.width = 1024; c.height = 512;
-  const ctx = c.getContext('2d');
-  // sky
-  const sky = ctx.createLinearGradient(0, 0, 0, 256);
-  sky.addColorStop(0, '#2f6fd0');
-  sky.addColorStop(0.6, '#7fb4ee');
-  sky.addColorStop(1, '#dcefff');
-  ctx.fillStyle = sky; ctx.fillRect(0, 0, 1024, 256);
-  // soft sun glow
-  const glow = ctx.createRadialGradient(720, 90, 10, 720, 90, 220);
-  glow.addColorStop(0, 'rgba(255,250,230,0.95)');
-  glow.addColorStop(1, 'rgba(255,250,230,0)');
-  ctx.fillStyle = glow; ctx.fillRect(400, 0, 624, 300);
-  // a few clouds
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  for (let i = 0; i < 16; i++) {
-    const x = Math.random() * 1024, y = 40 + Math.random() * 150, r = 18 + Math.random() * 34;
-    for (let b = 0; b < 5; b++) ctx.beginPath(), ctx.arc(x + b * r * 0.7 - r, y, r * (0.6 + Math.random() * 0.5), 0, 7), ctx.fill();
-  }
-  // ground
-  const grd = ctx.createLinearGradient(0, 256, 0, 512);
-  grd.addColorStop(0, '#6f9a55');
-  grd.addColorStop(1, '#3f5e34');
-  ctx.fillStyle = grd; ctx.fillRect(0, 256, 1024, 256);
-  const tex = new THREE.CanvasTexture(c);
-  tex.mapping = THREE.EquirectangularReflectionMapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
 // Overview camera for the lobby / attract screen.
 const overview = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 2000);
+overview.layers.enable(1);
 
 window.addEventListener('resize', () => {
   const w = window.innerWidth, h = window.innerHeight;
@@ -455,6 +429,7 @@ function renderSplit() {
 }
 
 function renderOverview(t) {
+  G.track.sunHelper.update();
   colorGradePass.uniforms.uBoost.value.set(0, 0, 0, 0);
   bloomPass.enabled = true;
   const W = window.innerWidth, H = window.innerHeight;

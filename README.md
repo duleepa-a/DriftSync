@@ -62,6 +62,8 @@ Key files:
 
 The car model and HDR environments are served from `public/assets`. The car falls back to a procedural model if its glTF file fails to load. For three or four players, bloom is disabled to reduce the cost of rendering several views. Actual frame rate depends on the laptop GPU and display resolution.
 
+Sunset lighting uses `venice_sunset_1k.hdr`, loaded with `RGBELoader` and filtered with PMREM for `scene.environment`. A matching procedural sunset sky keeps the HDRI's photographed buildings out of the backdrop. A warm directional sun matches the HDRI's 3.3° elevation beyond the treeline. Its faint `DirectionalLightHelper` appears in the lobby overview; adjust `sun.position` and `sun.target` in `buildTrack` to reposition it. Procedural environment lighting remains available if the HDRI cannot load.
+
 ## Development
 
 Run `npm test` for the multiplayer routing, driving, and lap gate tests. Change driving parameters in `public/js/physics.js`, lap settings in `public/js/race.js`, and track shape in `public/js/track.js`.
