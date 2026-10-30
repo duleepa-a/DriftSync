@@ -56,6 +56,7 @@ Key files:
 | `public/js/nitro-visuals.js` | Glowing bottle and road-ring visuals |
 | `public/js/race.js` | Lap gate progress and rankings |
 | `public/js/track.js` | Track geometry, scenery, and gate locations |
+| `public/js/road-material.js` | Asphalt albedo, normal, and racing-line roughness maps |
 | `public/js/carmesh.js` | Car asset loading, cloning, and disposal |
 | `public/js/audio.js` | Engine and effect audio |
 | `public/js/controller.js` | Phone controls and feedback |
@@ -65,6 +66,8 @@ The car model and HDR environments are served from `public/assets`. The car fall
 Sunset lighting uses `venice_sunset_1k.hdr`, loaded with `RGBELoader` and filtered with PMREM for `scene.environment`. A matching procedural sunset sky keeps the HDRI's photographed buildings out of the backdrop. A warm directional sun matches the HDRI's 3.3° elevation beyond the treeline. Its faint `DirectionalLightHelper` appears in the lobby overview; adjust `sun.position` and `sun.target` in `buildTrack` to reposition it. Procedural environment lighting remains available if the HDRI cannot load.
 
 ## Development
+
+The road uses `MeshStandardMaterial` with locally generated, seamless PBR textures. Albedo uses sRGB; normal and roughness maps use linear data. Albedo/normal detail tiles every 2 m, while roughness spans the road width once: approximately 0.78 at the centre, gradually rising to 0.94 at the shoulders. The road's environment intensity is 0.8 to balance visible surface detail with subtle sunset reflections on dry asphalt. Adjust these values and `normalScale` in `public/js/road-material.js` to tune the surface.
 
 Run `npm test` for the multiplayer routing, driving, and lap gate tests. Change driving parameters in `public/js/physics.js`, lap settings in `public/js/race.js`, and track shape in `public/js/track.js`.
 

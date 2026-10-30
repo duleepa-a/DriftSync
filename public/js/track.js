@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createRoadMaterial } from './road-material.js';
 
 /**
  * Builds the world: ground, lights, a wide closed race circuit with continuous
@@ -83,7 +84,9 @@ export function buildTrack(scene) {
   }
 
   // ---------- Road, kerbs, walls ----------
-  buildRibbon(scene, samples, tangents, -halfWidth, halfWidth, 0.01, makeAsphaltMat(), 1 / 7);
+  const road = buildRibbon(scene, samples, tangents, -halfWidth, halfWidth, 0.01,
+    createRoadMaterial(halfWidth * 2, curve.getLength()), 1 / samples.length);
+  road.name = 'asphalt-road';
   buildRibbon(scene, samples, tangents, halfWidth - 1.6, halfWidth, 0.06, makeKerbMat(), 0.5);
   buildRibbon(scene, samples, tangents, -halfWidth, -(halfWidth - 1.6), 0.06, makeKerbMat(), 0.5);
   buildWall(scene, samples, tangents, halfWidth + 0.3, 3.2);
@@ -501,20 +504,6 @@ function makeStartGrid(samples, tangents, halfWidth) {
 // ----------------------------------------------------------------------------
 // Procedural textures / materials
 // ----------------------------------------------------------------------------
-function makeAsphaltMat() {
-  const tex = canvasTexture(256, 256, (ctx) => {
-    ctx.fillStyle = '#34373d'; ctx.fillRect(0, 0, 256, 256);
-    for (let i = 0; i < 4000; i++) {
-      const v = 36 + Math.random() * 42;
-      ctx.fillStyle = `rgba(${v},${v},${v + 5},0.5)`;
-      ctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
-    }
-  });
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.anisotropy = 8;
-  return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92, metalness: 0.02 });
-}
-
 function makeKerbMat() {
   const tex = canvasTexture(32, 32, (ctx) => {
     ctx.fillStyle = '#d83a2f'; ctx.fillRect(0, 0, 32, 16);

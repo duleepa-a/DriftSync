@@ -48,6 +48,7 @@ app.get('/render-check.mjs', (_req, res) => res.type('js').send(`
 import { G, scene, renderer, colorGradePass, addPlayer, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera } from '/js/host.js';
 import { resetMotion, renderCar } from '/js/motion.js';
 import { updateCarEffects } from '/js/car-effects.js';
+import * as THREE from 'three';
 const report = document.createElement('pre');
 report.id = 'render-result';
 document.body.appendChild(report);
@@ -87,6 +88,15 @@ try {
   const elevation = Math.atan2(sunDirection.y, Math.hypot(sunDirection.x, sunDirection.z)) * 180 / Math.PI;
   if (elevation < 2 || elevation > 6 || sun.position.length() < 900) throw new Error('Sun is not low behind the treeline');
   if (sunHelper.light !== sun || sunHelper.lightPlane.material.opacity > 0.2 || sunHelper.layers.mask !== 2) throw new Error('Sun positioning helper is missing or too prominent');
+  const road = scene.getObjectByName('asphalt-road');
+  const asphalt = road?.material;
+  if (!asphalt?.isMeshStandardMaterial || !asphalt.map || !asphalt.normalMap || !asphalt.roughnessMap) throw new Error('Road PBR maps are missing');
+  if (asphalt.map.colorSpace !== THREE.SRGBColorSpace || asphalt.normalMap.colorSpace !== THREE.NoColorSpace || asphalt.roughnessMap.colorSpace !== THREE.NoColorSpace) throw new Error('Incorrect PBR texture color spaces');
+  if (asphalt.map.repeat.x <= 1 || asphalt.roughnessMap.repeat.x !== 1 || !asphalt.map.repeat.equals(asphalt.normalMap.repeat)) throw new Error('Racing-line roughness must not tile across the road');
+  const rough = asphalt.roughnessMap.image;
+  const centre = rough.data[(Math.floor(rough.width / 2)) * 4 + 1] / 255;
+  const shoulder = rough.data[1] / 255;
+  if (centre < 0.7 || centre > 0.85 || shoulder < 0.9 || shoulder - centre < 0.08 || asphalt.metalness !== 0 || asphalt.envMapIntensity > 0.85) throw new Error('Dry asphalt must retain subtle wear without a glossy reflection stripe');
   renderOverview(0);
   document.getElementById('lobby').classList.add('hidden');
   for (let count = 1; count <= 4; count++) {

@@ -6,8 +6,12 @@ import { pathToFileURL } from 'node:url';
 import * as THREE from 'three';
 
 const root = resolve(import.meta.dirname, '..');
-const trackSource = readFileSync(resolve(root, 'public/js/track.js'), 'utf8')
+const roadSource = readFileSync(resolve(root, 'public/js/road-material.js'), 'utf8')
   .replace("from 'three'", `from '${pathToFileURL(resolve(root, 'node_modules/three/build/three.module.js'))}'`);
+const roadUrl = `data:text/javascript,${encodeURIComponent(roadSource)}`;
+const trackSource = readFileSync(resolve(root, 'public/js/track.js'), 'utf8')
+  .replace("from 'three'", `from '${pathToFileURL(resolve(root, 'node_modules/three/build/three.module.js'))}'`)
+  .replace("from './road-material.js'", `from ${JSON.stringify(roadUrl)}`);
 const { buildTrack } = await import(`data:text/javascript,${encodeURIComponent(trackSource)}`);
 const nitroSource = readFileSync(resolve(root, 'public/js/nitro.js'), 'utf8');
 const nitroUrl = `data:text/javascript,${encodeURIComponent(nitroSource)}`;
