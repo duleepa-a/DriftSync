@@ -9,7 +9,30 @@ const root = path.resolve(__dirname, '..');
 const chrome = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const scale = process.argv.includes('--dpr=2') ? 2 : 1;
 const app = express();
-let browser, timeout, received = false;
+let browser, timeout, received = false, debugOrigin;
+app.post('/capture-ui/:name', async (req, res) => {
+  if (!['finish-waiting', 'race-results'].includes(req.params.name)) return res.sendStatus(400);
+  try {
+    const tabs = await (await fetch(debugOrigin + '/json/list')).json();
+    const tab = tabs.find(tab => tab.type === 'page');
+    const data = await new Promise((resolve, reject) => {
+      const ws = new WebSocket(tab.webSocketDebuggerUrl);
+      const timer = setTimeout(() => { ws.close(); reject(new Error('UI capture timed out')); }, 5000);
+      ws.addEventListener('open', () => ws.send(JSON.stringify({ id: 1, method: 'Page.captureScreenshot', params: { format: 'png' } })));
+      ws.addEventListener('message', event => {
+        const reply = JSON.parse(event.data);
+        if (reply.id !== 1) return;
+        clearTimeout(timer); ws.close();
+        if (reply.error) reject(new Error(reply.error.message));
+        else resolve(reply.result.data);
+      });
+      ws.addEventListener('error', () => { clearTimeout(timer); reject(new Error('UI capture connection failed')); });
+    });
+    const screenshotPath = path.join(os.tmpdir(), 'driftsync-' + req.params.name + '-dpr' + scale + '.png');
+    fs.writeFileSync(screenshotPath, Buffer.from(data, 'base64'));
+    res.json({ screenshotPath });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+});
 // High-DPI PNGs contain much more asphalt/forest detail than the 1x captures.
 app.post('/render-result', express.json({ limit: '32mb' }), (req, res) => {
   received = true;
@@ -42,11 +65,11 @@ app.get('/js/host.js', (_req, res) => {
   // Stop only the scheduled loop, so each test can inspect a completed frame.
   const source = fs.readFileSync(path.join(root, 'public/js/host.js'), 'utf8')
     .replaceAll('requestAnimationFrame(loop);', '')
-    + '\nexport { G, scene, renderer, composer, renderPass, bloomPass, colorGradePass, addPlayer, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera };';
+    + '\nexport { G, scene, renderer, composer, renderPass, bloomPass, colorGradePass, addPlayer, removePlayer, backToLobby, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera };';
   res.type('js').send(source);
 });
 app.get('/render-check.mjs', (_req, res) => res.type('js').send(`
-import { G, scene, renderer, composer, renderPass, bloomPass, colorGradePass, addPlayer, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera } from '/js/host.js';
+import { G, scene, renderer, composer, renderPass, bloomPass, colorGradePass, addPlayer, removePlayer, backToLobby, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera } from '/js/host.js';
 import { resetMotion, renderCar } from '/js/motion.js';
 import { updateCarEffects } from '/js/car-effects.js';
 import * as THREE from 'three';
@@ -120,6 +143,72 @@ function checkBloom() {
   renderPass.scene = scene;
   geometry.dispose(); red.dispose(); white.dispose();
   return { exposure: renderer.toneMappingExposure, strength: bloomPass.strength, radius: bloomPass.radius, threshold: bloomPass.threshold, redHalo, whiteHalo };
+}
+async function checkFinishing() {
+  function begin() {
+    backToLobby(); spawnCars(); layoutHud();
+    document.getElementById('lobby').classList.add('hidden');
+    G.state = 'racing'; G.raceStart = performance.now() - 90000;
+  }
+  function crossFinish(p) {
+    const gate = G.track.gates[0];
+    p.lap = 2; p.nextGate = 0; p.lapStartedAt = 60000; p.bestLapTime = 28000; p.topSpeed = 52;
+    p.pos.copy(gate.pos).addScaledVector(gate.tangent, -0.1);
+    p.heading = Math.atan2(gate.tangent.x, gate.tangent.z);
+    p.speed = p.prevSpeed = 20;
+    resetMotion(p); renderCar(p, 1); placeCamera(p, true);
+    updateRace(1 / 60); renderSplit();
+    if (!p.finished) throw new Error('Final gate crossing did not finish the player');
+  }
+  async function capture(name) {
+    await new Promise(requestAnimationFrame);
+    const response = await fetch('/capture-ui/' + name, { method: 'POST' });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error);
+    return result.screenshotPath;
+  }
+  begin();
+  const players = [...G.players.values()];
+  crossFinish(players[1]);
+  const frozenPosition = players[1].pos.clone(), frozenTime = players[1].finishTime;
+  await new Promise(resolve => setTimeout(resolve, 1800)); // Catch the former winner timeout.
+  if (G.state !== 'racing' || !document.getElementById('results').classList.contains('hidden')) throw new Error('Winner ended the race before the other players');
+  // A stationary finisher must not be moved by controls or collisions.
+  players[0].pos.copy(frozenPosition); players[0].speed = 0;
+  players[1].input = { brake: 1, steer: 1 };
+  updateRace(0.1); renderSplit();
+  if (!players[1].pos.equals(frozenPosition) || players[1].finishTime !== frozenTime || players[0].speed <= 0) throw new Error('Finisher moved or remaining racers stopped');
+  crossFinish(players[0]);
+  window.dispatchEvent(new Event('resize')); renderSplit();
+  const cells = [...document.querySelectorAll('.hud-cell')];
+  for (let i = 0; i < players.length; i++) {
+    const panel = cells[i].querySelector('[data-finish]');
+    if (panel.classList.contains('hidden') === players[i].finished) throw new Error('Finish overlay is on the wrong player');
+    if (players[i].finished) {
+      const bounds = cells[i].getBoundingClientRect(), card = panel.firstElementChild.getBoundingClientRect();
+      if (card.top < bounds.top || card.bottom > bounds.bottom || card.left < bounds.left || card.right > bounds.right) throw new Error('Finish card exceeds its viewport');
+      if (!panel.querySelector('[data-finish-waiting]').textContent.includes('2 racers') || panel.querySelector('[data-best-lap]').textContent !== '0:28.00' || panel.querySelector('[data-top-speed]').textContent !== '116 MPH') throw new Error('Finished player statistics are incorrect');
+    }
+  }
+  const waitingScreenshotPath = await capture('finish-waiting');
+  crossFinish(players[3]);
+  if (G.state !== 'racing') throw new Error('Race ended before last finisher');
+  crossFinish(players[2]);
+  if (G.state !== 'results' || document.getElementById('results').classList.contains('hidden')) throw new Error('Last finisher did not show results');
+  const names = [...document.querySelectorAll('#standings .sname')].map(el => el.textContent);
+  if (names.join(',') !== [players[1], players[0], players[3], players[2]].map(p => p.name).join(',')) throw new Error('Results lost finish order');
+  const resultsScreenshotPath = await capture('race-results');
+  begin();
+  if (G.finishOrder.length || players.some(p => p.finished || p.bestLapTime || p.topSpeed)) throw new Error('Restart retained finishing state');
+  crossFinish(players[1]); removePlayer(players[1].id);
+  crossFinish(players[0]);
+  removePlayer(players[2].id); removePlayer(players[3].id);
+  if (G.state !== 'results' || players[0].finishRank !== 2 || document.querySelectorAll('#standings .standing').length !== 2) throw new Error('Disconnects blocked completion or changed recorded places');
+  begin(); crossFinish(players[0]);
+  if (G.state !== 'results' || players[0].finishRank !== 1) throw new Error('Single-player finish regressed');
+  backToLobby();
+  if (document.querySelector('[data-finish]')) throw new Error('Reset retained finish overlays');
+  return { order: names, waitingScreenshotPath, resultsScreenshotPath, disconnects: 'passed', restart: 'passed', singlePlayer: 'passed' };
 }
 try {
   const deadline = performance.now() + 30000;
@@ -268,7 +357,8 @@ try {
   const forest = scene.getObjectByName('instanced-pine-forest');
   const stands = scene.getObjectByName('track-scenery').children.filter(child => child.isLOD);
   const scenery = { trees: forest.count, forestTriangles: forest.count * forest.geometry.attributes.position.count / 3, grandstands: stands.length };
-  report.textContent = JSON.stringify({ devicePixelRatio, motion, nitro, bloom, scenery, cases, screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot });
+  const finishing = await checkFinishing();
+  report.textContent = JSON.stringify({ devicePixelRatio, motion, nitro, bloom, scenery, finishing, cases, screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot });
 } catch (error) { report.textContent = JSON.stringify({ error: error.stack }); }
 await fetch('/render-result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: report.textContent });
 `));
@@ -280,13 +370,18 @@ const server = app.listen(0, '127.0.0.1', () => {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'driftsync-render-'));
   browser = spawn(chrome, [
     '--headless=new', '--no-first-run', '--no-default-browser-check',
+    '--remote-debugging-port=0',
     '--disable-background-networking', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
     '--window-size=960,640', '--force-device-scale-factor=' + scale,
     '--user-data-dir=' + profile,
     'http://127.0.0.1:' + server.address().port,
   ], { windowsHide: true });
   let errors = '';
-  browser.stderr.on('data', chunk => { errors += chunk; });
+  browser.stderr.on('data', chunk => {
+    errors += chunk;
+    const match = errors.match(/DevTools listening on (ws:\/\/[^\s]+)/);
+    if (match) debugOrigin = 'http://127.0.0.1:' + new URL(match[1]).port;
+  });
   timeout = setTimeout(() => browser.kill(), 60000);
   browser.on('error', error => { console.error(error.message); process.exitCode = 1; server.close(); clearTimeout(timeout); });
   browser.on('close', () => {

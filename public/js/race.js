@@ -1,6 +1,25 @@
 export const TOTAL_LAPS = 3;
 export const GATE_RADIUS = 28;
 
+// Keep a race-wide record, independent of controllers leaving/rejoining.
+export function recordFinish(p, finishOrder, elapsed) {
+  if (p.finished || p.lap < TOTAL_LAPS || finishOrder.some(result => result.id === p.id)) return false;
+  p.finished = true;
+  p.finishTime = Math.max(0, elapsed);
+  p.finishRank = finishOrder.length + 1;
+  finishOrder.push({
+    id: p.id, name: p.name, color: p.color, finished: true,
+    finishRank: p.finishRank, finishTime: p.finishTime,
+    bestLapTime: p.bestLapTime, topSpeed: p.topSpeed,
+  });
+  return true;
+}
+
+export function allPlayersFinished(players) {
+  const entrants = [...players];
+  return entrants.length > 0 && entrants.every(p => p.finished);
+}
+
 export function advanceGates(p, gates, previousX, previousZ) {
   if (p.finished) return false;
   const gate = p.nextGate % gates.length;
