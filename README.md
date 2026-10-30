@@ -28,6 +28,8 @@ The server listens on port 3000 by default. Set `PORT` to change it. If the QR c
 
 Collect the glowing **N₂O bottles** on the main and back straights for an automatic two-second nitrous boost. Each station has three bottles across the road; a collected bottle returns after eight seconds. Braking cancels the boost. Nitrous raises the speed limit from 46 to 64 m/s (about 103 to 143 mph), then eases back to normal speed. Normal acceleration is 26 m/s².
 
+Active nitrous produces blue exhaust flames, a gentle camera pullback, and blur near the edges of your view. Red rear lights brighten when braking, and white reverse lights turn on when moving backward. The speed effects are separate for each player; turning postprocessing off with **B** also disables the blur.
+
 On a laptop controller tab, use **Left/Right** or **A/D** to steer and **Down**, **S**, or **Space** to brake. Audio is temporarily disabled. Press **B** on the host screen to toggle postprocessing.
 
 If a phone cannot connect, check that it is on the same Wi-Fi network and that the laptop firewall allows Node.js on private networks. If the host disconnects, the old room closes; the host creates a new code on reconnect and controllers must join that new room.

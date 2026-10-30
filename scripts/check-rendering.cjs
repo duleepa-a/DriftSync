@@ -19,7 +19,7 @@ app.post('/render-result', express.json({ limit: '8mb' }), (req, res) => {
     delete report.screenshot;
     report.screenshotPath = screenshotPath;
   }
-  for (const key of ['nitroScreenshot', 'boostScreenshot']) {
+  for (const key of ['nitroScreenshot', 'boostScreenshot', 'brakeReverseScreenshot']) {
     if (!report[key]) continue;
     const screenshotPath = path.join(os.tmpdir(), 'driftsync-' + key + '-dpr' + scale + '.png');
     fs.writeFileSync(screenshotPath, Buffer.from(report[key].split(',')[1], 'base64'));
@@ -41,18 +41,19 @@ app.get('/js/host.js', (_req, res) => {
   // Stop only the scheduled loop, so each test can inspect a completed frame.
   const source = fs.readFileSync(path.join(root, 'public/js/host.js'), 'utf8')
     .replaceAll('requestAnimationFrame(loop);', '')
-    + '\nexport { G, scene, renderer, sceneTarget, addPlayer, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera };';
+    + '\nexport { G, scene, renderer, sceneTarget, colorGradePass, addPlayer, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera };';
   res.type('js').send(source);
 });
 app.get('/render-check.mjs', (_req, res) => res.type('js').send(`
-import { G, scene, renderer, addPlayer, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera } from '/js/host.js';
+import { G, scene, renderer, colorGradePass, addPlayer, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera } from '/js/host.js';
 import { resetMotion, renderCar } from '/js/motion.js';
+import { updateCarEffects } from '/js/car-effects.js';
 const report = document.createElement('pre');
 report.id = 'render-result';
 document.body.appendChild(report);
 const cases = [];
 const motion = [];
-let screenshot, nitroScreenshot, boostScreenshot, nitro;
+let screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, nitro;
 function inspectFrame(name, count) {
   const gl = renderer.getContext();
   const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
@@ -149,19 +150,47 @@ try {
       boostScreenshot = renderer.domElement.toDataURL('image/png');
       const indicators = [...document.querySelectorAll('[data-nitro]')];
       if (players.some(p => p.nitroTime <= 0 || p.speed <= 46)) throw new Error('Nitro failed to increase speed');
+      if (players.some(p => !p.mesh.userData.effects.flames.visible || p.camera.fov <= 65)) throw new Error('Missing blue flames or nitro zoom');
+      if (colorGradePass.uniforms.uBoost.value.x < 0.9 || colorGradePass.uniforms.uBoost.value.y < 0.9) throw new Error('Nitro blur did not activate');
       if (bottles.some(p => p.cooldown <= 0 || scene.getObjectByName('nitro-' + p.id).visible)) throw new Error('Collected bottle did not disappear');
       if (indicators.some(el => el.classList.contains('hidden') || el.getBoundingClientRect().width <= 0)) throw new Error('Nitro HUD is missing');
       nitro = { stations: G.nitroPickups.length / 3, speeds: players.map(p => p.speed), activeIndicators: indicators.length };
       players[0].input.brake = 1;
       updateRace(1 / 60); renderSplit();
       if (players[0].nitroTime !== 0 || !indicators[0].classList.contains('hidden') || players[1].nitroTime <= 0) throw new Error('Braking must cancel nitro for that player only');
+      if (players[0].mesh.userData.effects.flames.visible || !players[1].mesh.userData.effects.flames.visible) throw new Error('Flames leaked between players');
+      if (players[0].mesh.userData.brakeMaterials.some(m => m.emissiveIntensity !== 1.4)) throw new Error('Brake lights did not turn red');
+      if (colorGradePass.uniforms.uBoost.value.x >= colorGradePass.uniforms.uBoost.value.y) throw new Error('Blur is not independent per viewport');
       for (let frame = 0; frame < 500; frame++) updateRace(1 / 60);
       if (bottles.some(p => p.cooldown !== 0 || !scene.getObjectByName('nitro-' + p.id).visible)) throw new Error('Nitro did not respawn');
       spawnCars(); renderSplit();
       if (players.some(p => p.nitroTime !== 0) || G.nitroPickups.some(p => p.cooldown !== 0)) throw new Error('Restart retained nitro state');
+      if (players.some(p => p.nitroVisual !== 0 || p.mesh.userData.effects.flames.visible)) throw new Error('Restart retained speed effects');
+      players[0].input.brake = 1;
+      players[1].input.brake = 1; players[1].speed = -3;
+      players.forEach(p => updateCarEffects(p, 1 / 60));
+      renderSplit(); inspectFrame('red brake lights and white reverse lights', 2);
+      brakeReverseScreenshot = renderer.domElement.toDataURL('image/png');
+      if (players[1].mesh.userData.effects.reverseMaterial.emissiveIntensity !== 3) throw new Error('Reverse lamps did not turn white');
+      if (players[0].mesh.userData.effects.reverseMaterial.emissiveIntensity !== 0) throw new Error('Reverse lamps lit while stationary');
+      spawnCars();
+    }
+    if (count >= 3) {
+      const players = [...G.players.values()];
+      const boosted = players[count - 1];
+      boosted.nitroTime = 1; boosted.speed = 46;
+      updateCarEffects(boosted, 0.1); placeCamera(boosted, false, 0.1);
+      renderSplit(); inspectFrame(count + ' players, last player boosted', count);
+      const amounts = colorGradePass.uniforms.uBoost.value.toArray();
+      if (amounts.some((value, i) => i === count - 1 ? value <= 0 : value !== 0)) throw new Error('Boost blur mapped to the wrong quadrant');
+      if (count === 4) {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'b' }));
+        renderSplit(); inspectFrame('4 players, flames with postprocessing off', count);
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'b' }));
+      }
     }
   }
-  report.textContent = JSON.stringify({ devicePixelRatio, motion, nitro, cases, screenshot, nitroScreenshot, boostScreenshot });
+  report.textContent = JSON.stringify({ devicePixelRatio, motion, nitro, cases, screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot });
 } catch (error) { report.textContent = JSON.stringify({ error: error.stack }); }
 await fetch('/render-result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: report.textContent });
 `));
