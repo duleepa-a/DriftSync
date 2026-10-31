@@ -92,7 +92,7 @@ export function updateCar(p, dt, track, { dropSkid, onGate }) {
   const wroll = p.speed * dt * 1.8;
   p.wheelSpin = (p.wheelSpin || 0) + wroll;
   for (let i = 0; i < wheels.length; i++) {
-    wheels[i].rotation.x = p.wheelSpin;
+    (wheels[i].userData.spin || wheels[i]).rotation.x = p.wheelSpin;
     if (i < 2) wheels[i].rotation.y = steer * 0.4;
   }
   if (p.skidding && wheels.length >= 4) {

@@ -237,6 +237,9 @@ try {
     const i = count - 1;
     addPlayer({ id: 'test-' + i, slot: i, name: 'Test ' + count, color: ['#ff4757', '#1e90ff', '#2ed573', '#ffa502'][i] });
     spawnCars(); layoutHud();
+    for (const player of G.players.values()) {
+      if (player.mesh.userData.modelId !== 'mclaren-2021') throw new Error('McLaren asset failed to load; procedural fallback is active');
+    }
     await new Promise(requestAnimationFrame);
     renderSplit();
     inspectFrame(count + ' players', count);
