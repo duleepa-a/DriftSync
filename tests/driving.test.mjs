@@ -159,3 +159,43 @@ test('default driving launches and stays within the real track', () => {
     }
   }
 });
+
+test('turning alone leaves no tire marks; hard braking and wall impact leave two', () => {
+  const track = {
+    halfWidth: 10,
+    nearestInfo(pos) { return { index: 0, offset: pos.x, nx: 1, nz: 0, groundY: 0 }; },
+  };
+  const mesh = new THREE.Group();
+  mesh.userData.wheels = [-0.85, 0.85, -0.85, 0.85].map((x, i) => {
+    const wheel = new THREE.Group();
+    wheel.position.set(x, 0.36, i < 2 ? 1.2 : -1.4);
+    mesh.add(wheel);
+    return wheel;
+  });
+  const p = {
+    input: { steer: 1, brake: 0 }, steerSmooth: 1,
+    speed: 40, prevSpeed: 40, gear: 0, pos: new THREE.Vector3(),
+    heading: 0, sampleIndex: 0, groundY: 0, offTrack: false, mesh,
+  };
+  const marks = [];
+  const hooks = { dropSkid: (...args) => marks.push(args), onGate() {} };
+  updateCar(p, 1 / 60, track, hooks);
+  assert.ok(Math.abs(p.steerSmooth) * Math.abs(p.speed) > 30, 'exercise the former drift threshold');
+  assert.equal(p.skidding, false);
+  assert.equal(marks.length, 0);
+
+  p.input = { steer: 0, brake: 1 };
+  p.steerSmooth = 0;
+  updateCar(p, 1 / 60, track, hooks);
+  assert.equal(p.skidding, true);
+  assert.equal(marks.length, 2);
+
+  p.input.brake = 0;
+  p.speed = p.prevSpeed = 35;
+  p.pos.set(8.4, 0, 0);
+  p.heading = Math.PI / 2;
+  updateCar(p, 1 / 60, track, hooks);
+  assert.equal(p.offTrack, true);
+  assert.equal(p.skidding, true);
+  assert.equal(marks.length, 4);
+});

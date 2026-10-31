@@ -18,7 +18,7 @@ app.post('/capture-ui/:name', async (req, res) => {
     const tab = tabs.find(tab => tab.type === 'page');
     const data = await new Promise((resolve, reject) => {
       const ws = new WebSocket(tab.webSocketDebuggerUrl);
-      const timer = setTimeout(() => { ws.close(); reject(new Error('UI capture timed out')); }, 5000);
+      const timer = setTimeout(() => { ws.close(); reject(new Error('UI capture timed out')); }, 15000);
       ws.addEventListener('open', () => ws.send(JSON.stringify({ id: 1, method: 'Page.captureScreenshot', params: { format: 'png' } })));
       ws.addEventListener('message', event => {
         const reply = JSON.parse(event.data);
@@ -44,7 +44,7 @@ app.post('/render-result', express.json({ limit: '32mb' }), (req, res) => {
     delete report.screenshot;
     report.screenshotPath = screenshotPath;
   }
-  for (const key of ['nitroScreenshot', 'boostScreenshot', 'brakeReverseScreenshot', 'sceneryScreenshot']) {
+  for (const key of ['nitroScreenshot', 'boostScreenshot', 'brakeReverseScreenshot', 'sceneryScreenshot', 'smokeScreenshot']) {
     if (!report[key]) continue;
     const screenshotPath = path.join(os.tmpdir(), 'driftsync-' + key + '-dpr' + scale + '.png');
     fs.writeFileSync(screenshotPath, Buffer.from(report[key].split(',')[1], 'base64'));
@@ -66,12 +66,12 @@ app.get('/js/host.js', (_req, res) => {
   // Stop only the scheduled loop, so each test can inspect a completed frame.
   const source = fs.readFileSync(path.join(root, 'public/js/host.js'), 'utf8')
     .replaceAll('requestAnimationFrame(loop);', '')
-    + '\nexport { G, scene, renderer, composer, renderPass, bloomPass, colorGradePass, addPlayer, removePlayer, backToLobby, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera };';
+    + '\nexport { G, scene, renderer, composer, renderPass, bloomPass, colorGradePass, addPlayer, removePlayer, backToLobby, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera, emitCarSmoke, updateSmoke, smokePool, skidMesh };';
   res.type('js').send(source);
 });
 app.get('/profile-car.mjs', (_req, res) => res.sendFile(path.join(__dirname, 'profile-car.mjs')));
 app.get('/render-check.mjs', (_req, res) => res.type('js').send(`
-import { G, scene, renderer, composer, renderPass, bloomPass, colorGradePass, addPlayer, removePlayer, backToLobby, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera } from '/js/host.js';
+import { G, scene, renderer, composer, renderPass, bloomPass, colorGradePass, addPlayer, removePlayer, backToLobby, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera, emitCarSmoke, updateSmoke, smokePool, skidMesh } from '/js/host.js';
 import { resetMotion, renderCar } from '/js/motion.js';
 import { updateCarEffects } from '/js/car-effects.js';
 import * as THREE from 'three';
@@ -80,7 +80,7 @@ report.id = 'render-result';
 document.body.appendChild(report);
 const cases = [];
 const motion = [];
-let screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, nitro, bloom;
+let screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, smokeScreenshot, nitro, bloom;
 let shaderError;
 renderer.debug.onShaderError = (gl, program, vertex, fragment) => {
   shaderError = [gl.getProgramInfoLog(program), gl.getShaderInfoLog(vertex), gl.getShaderInfoLog(fragment)].join('\\n');
@@ -241,6 +241,7 @@ try {
     spawnCars(); layoutHud();
     for (const player of G.players.values()) {
       if (player.mesh.userData.modelId !== 'mclaren-2021') throw new Error('McLaren asset failed to load; procedural fallback is active');
+      if (player.mesh.userData.wheels.length !== 4 || player.mesh.userData.wheels.some(wheel => !wheel)) throw new Error('McLaren wheel contact points are missing');
       player.mesh.traverse(object => {
         if (object.isMesh && object.material.transmission > 0) throw new Error('Car glass re-enabled an extra scene transmission pass');
       });
@@ -274,6 +275,34 @@ try {
       motion.push({ players: count, displayHz: 120, simulatedSeconds: 2, stalledFrames, maxCameraOffset, speeds: players.map(p => p.speed) });
       spawnCars();
       renderSplit();
+    }
+    if (count === 1) {
+      const p = [...G.players.values()][0];
+      p.speed = p.prevSpeed = 35;
+      p.input.brake = 1;
+      updateRace(1 / 60);
+      const skidMatrix = new THREE.Matrix4();
+      skidMesh.getMatrixAt(0, skidMatrix);
+      if (Math.abs(skidMatrix.determinant()) < 0.001) throw new Error('Braking McLaren left no tire mark');
+      emitCarSmoke(p); updateSmoke(1 / 60);
+      const visibleSmoke = smokePool.filter(item => item.sp.visible && item.sp.material.opacity > 0);
+      if (visibleSmoke.length < 2) throw new Error('Braking McLaren emitted no tire smoke');
+      const rearWheels = p.mesh.userData.wheels.slice(2);
+      for (let wi = 0; wi < 2; wi++) {
+        const wheelPosition = rearWheels[wi].getWorldPosition(new THREE.Vector3());
+        if (visibleSmoke[wi].sp.position.distanceTo(wheelPosition) > 0.5) throw new Error('Tire smoke is not placed at the rear wheels');
+      }
+      renderSplit(); inspectFrame('1 player braking with skid marks and smoke', 1);
+      smokeScreenshot = renderer.domElement.toDataURL('image/png');
+      visibleSmoke.forEach(item => { item.sp.visible = false; });
+      spawnCars();
+      p.speed = p.prevSpeed = 40;
+      p.steerSmooth = 1;
+      p.input.steer = 1;
+      updateRace(1 / 60);
+      emitCarSmoke(p);
+      if (p.skidding || smokePool.some(item => item.sp.visible)) throw new Error('Turning alone emitted tire smoke');
+      spawnCars();
     }
     if (count === 2) {
       screenshot = renderer.domElement.toDataURL('image/png');
@@ -366,7 +395,7 @@ try {
   const stands = scene.getObjectByName('track-scenery').children.filter(child => child.isLOD);
   const scenery = { trees: forest.count, forestTriangles: forest.count * forest.geometry.attributes.position.count / 3, grandstands: stands.length };
   const finishing = await checkFinishing();
-  report.textContent = JSON.stringify({ devicePixelRatio, motion, nitro, bloom, scenery, finishing, cases, screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot });
+  report.textContent = JSON.stringify({ devicePixelRatio, motion, nitro, bloom, scenery, finishing, cases, screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, smokeScreenshot });
 } catch (error) { report.textContent = JSON.stringify({ error: error.stack }); }
 await fetch('/render-result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: report.textContent });
 `));

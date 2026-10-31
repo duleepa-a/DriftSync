@@ -821,10 +821,7 @@ function updateSmoke(dt) {
   }
 }
 function emitCarSmoke(p) {
-  const drift = Math.abs(p.steerSmooth) > 0.5 && p.speed > 18;
-  const brakeHard = (p.input.brake || 0) > 0.5 && p.speed > 12;
-  const wallHit = p.offTrack && p.speed > 14;
-  if (!drift && !brakeHard && !wallHit) return;
+  if (!p.skidding) return;
   const wheels = p.mesh.userData.wheels || [];
   if (wheels.length < 4) return;
   for (const wi of [2, 3]) {
