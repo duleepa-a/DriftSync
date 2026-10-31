@@ -12,18 +12,72 @@ export function prepareMclaren(source) {
     .multiply(new THREE.Matrix4().makeTranslation(-center.x, -bounds.min.y, -center.z));
   const car = new THREE.Group();
   car.name = 'mclaren-2021-template';
+  const batches = new Map();
 
   source.traverse(mesh => {
     if (!mesh.isMesh) return;
     const transform = normalize.clone().multiply(mesh.matrixWorld);
     const geometry = mesh.geometry.clone().applyMatrix4(transform);
-    const material = Array.isArray(mesh.material)
-      ? mesh.material.map(item => item.clone())
-      : mesh.material.clone();
+    const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    const attributes = Object.keys(geometry.attributes).sort()
+      .map(name => {
+        const attribute = geometry.getAttribute(name);
+        return `${name}:${attribute.itemSize}:${attribute.array.constructor.name}:${attribute.normalized}`;
+      })
+      .join('|');
+    const key = `${material.uuid}:${attributes}`;
+    if (!batches.has(key)) batches.set(key, { material, geometries: [] });
+    batches.get(key).geometries.push(geometry);
+  });
+  for (const batch of batches.values()) {
+    const geometry = mergeGeometries(batch.geometries);
+    const material = batch.material.clone();
+    // The imported windows and lamp covers enable physical transmission.
+    // Even a small cover makes Three render the entire opaque scene again,
+    // with a multisampled, mipmapped buffer for each player's view. Alpha
+    // glass retains the tint, reflections and visible interior at a lower cost.
+    if (material.transmission > 0) {
+      material.transmission = 0;
+      material.depthWrite = false;
+      material.forceSinglePass = true;
+    }
     const copy = new THREE.Mesh(geometry, material);
-    copy.name = mesh.name;
+    copy.name = material.name;
     copy.castShadow = copy.receiveShadow = true;
     car.add(copy);
-  });
+    batch.geometries.forEach(item => item.dispose());
+  }
   return car;
+}
+
+function mergeGeometries(geometries) {
+  const first = geometries[0];
+  const merged = new THREE.BufferGeometry();
+  const vertexCount = geometries.reduce((total, geometry) => total + geometry.getAttribute('position').count, 0);
+  for (const name of Object.keys(first.attributes)) {
+    const source = first.getAttribute(name);
+    const array = new source.array.constructor(vertexCount * source.itemSize);
+    let offset = 0;
+    for (const geometry of geometries) {
+      const attribute = geometry.getAttribute(name);
+      array.set(attribute.array, offset);
+      offset += attribute.array.length;
+    }
+    merged.setAttribute(name, new THREE.BufferAttribute(array, source.itemSize, source.normalized));
+  }
+
+  const indices = [];
+  let vertexOffset = 0;
+  for (const geometry of geometries) {
+    const position = geometry.getAttribute('position');
+    const index = geometry.getIndex();
+    if (index) {
+      for (const value of index.array) indices.push(value + vertexOffset);
+    } else {
+      for (let i = 0; i < position.count; i++) indices.push(vertexOffset + i);
+    }
+    vertexOffset += position.count;
+  }
+  merged.setIndex(indices);
+  return merged;
 }

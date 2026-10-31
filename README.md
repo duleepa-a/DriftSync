@@ -82,4 +82,6 @@ Run `npm test` for the multiplayer routing, driving, and lap gate tests. Change 
 
 Run `npm run test:render` for a headless Chrome check of every player viewport, including toggling effects and resizing. Use `npm run test:render -- --dpr=2` to check high-density displays. The check uses the usual Windows Chrome path; set `CHROME_PATH` for another Chrome installation. It runs an isolated local test server and does not join a live game.
 
+The McLaren's 2,302 imported mesh pieces are batched by material into 22 meshes. Its windows and lamp covers use alpha transparency and environment reflections instead of physical transmission, avoiding an extra render of the track for every camera. The original model geometry and textures are preserved. Run `npm run test:render -- --profile-car` to compare the Ferrari, the batched McLaren with its original glass, and the optimized McLaren in the same scene. The report includes full-frame draw calls and render timings after warm-up; Chrome uses software rendering, so these timings compare rendering cost rather than predict the laptop's gameplay FPS.
+
 The included Ferrari model and HDR environments come from the Three.js example assets.

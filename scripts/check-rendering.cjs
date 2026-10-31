@@ -8,6 +8,7 @@ const express = require('express');
 const root = path.resolve(__dirname, '..');
 const chrome = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const scale = process.argv.includes('--dpr=2') ? 2 : 1;
+const profileCar = process.argv.includes('--profile-car');
 const app = express();
 let browser, timeout, received = false, debugOrigin;
 app.post('/capture-ui/:name', async (req, res) => {
@@ -51,14 +52,14 @@ app.post('/render-result', express.json({ limit: '32mb' }), (req, res) => {
     report[key + 'Path'] = screenshotPath;
   }
   console.log(JSON.stringify(report, null, 2));
-  if (report.error || report.cases.some(test => test.glError || test.views.some(view => view.bright < 0.2 || view.opaque < 0.95))) process.exitCode = 1;
+  if (report.error || report.cases?.some(test => test.glError || test.views.some(view => view.bright < 0.2 || view.opaque < 0.95))) process.exitCode = 1;
   res.sendStatus(200);
   browser.kill();
 });
 app.get('/', (_req, res) => {
   const html = fs.readFileSync(path.join(root, 'public/index.html'), 'utf8')
     .replace('<script src="/socket.io/socket.io.js"></script>', '<script>window.io = () => ({ on() {}, emit() {} });</script>')
-    .replace(/src="js\/host\.js[^"]*"/, 'src="/render-check.mjs"');
+    .replace(/src="js\/host\.js[^"]*"/, 'src="/' + (profileCar ? 'profile-car.mjs' : 'render-check.mjs') + '"');
   res.type('html').send(html);
 });
 app.get('/js/host.js', (_req, res) => {
@@ -68,6 +69,7 @@ app.get('/js/host.js', (_req, res) => {
     + '\nexport { G, scene, renderer, composer, renderPass, bloomPass, colorGradePass, addPlayer, removePlayer, backToLobby, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera };';
   res.type('js').send(source);
 });
+app.get('/profile-car.mjs', (_req, res) => res.sendFile(path.join(__dirname, 'profile-car.mjs')));
 app.get('/render-check.mjs', (_req, res) => res.type('js').send(`
 import { G, scene, renderer, composer, renderPass, bloomPass, colorGradePass, addPlayer, removePlayer, backToLobby, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera } from '/js/host.js';
 import { resetMotion, renderCar } from '/js/motion.js';
@@ -239,6 +241,9 @@ try {
     spawnCars(); layoutHud();
     for (const player of G.players.values()) {
       if (player.mesh.userData.modelId !== 'mclaren-2021') throw new Error('McLaren asset failed to load; procedural fallback is active');
+      player.mesh.traverse(object => {
+        if (object.isMesh && object.material.transmission > 0) throw new Error('Car glass re-enabled an extra scene transmission pass');
+      });
     }
     await new Promise(requestAnimationFrame);
     renderSplit();
@@ -385,7 +390,7 @@ const server = app.listen(0, '127.0.0.1', () => {
     const match = errors.match(/DevTools listening on (ws:\/\/[^\s]+)/);
     if (match) debugOrigin = 'http://127.0.0.1:' + new URL(match[1]).port;
   });
-  timeout = setTimeout(() => browser.kill(), 60000);
+  timeout = setTimeout(() => browser.kill(), 180000);
   browser.on('error', error => { console.error(error.message); process.exitCode = 1; server.close(); clearTimeout(timeout); });
   browser.on('close', () => {
     clearTimeout(timeout);
