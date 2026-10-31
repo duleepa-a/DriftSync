@@ -71,9 +71,10 @@ export function updateCar(p, dt, track, { dropSkid, onGate }) {
   p.offTrack = hitWall;
 
   const corneringLoad = Math.abs(steer) * sp;
-  const lockup = brake > 0.6 && sp > 12;
+  const lockup = brake > 0.5 && sp > 12;
+  const wallImpact = hitWall && sp > 14;
   p.squeal = corneringLoad > 24 || lockup;
-  p.skidding = corneringLoad > 30 || lockup || hitWall;
+  p.skidding = lockup || wallImpact;
 
   const groundY = info.groundY;
   p.groundY += (groundY - p.groundY) * Math.min(1, dt * 9);
@@ -92,7 +93,7 @@ export function updateCar(p, dt, track, { dropSkid, onGate }) {
   const wroll = p.speed * dt * 1.8;
   p.wheelSpin = (p.wheelSpin || 0) + wroll;
   for (let i = 0; i < wheels.length; i++) {
-    wheels[i].rotation.x = p.wheelSpin;
+    (wheels[i].userData.spin || wheels[i]).rotation.x = p.wheelSpin;
     if (i < 2) wheels[i].rotation.y = steer * 0.4;
   }
   if (p.skidding && wheels.length >= 4) {

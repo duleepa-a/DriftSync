@@ -30,9 +30,11 @@ export function attachCarEffects(car) {
   flameGeometry.rotateX(-Math.PI / 2);
   flameGeometry.translate(0, 0, -0.5);
   const fallback = car.userData.isFallback;
-  for (const x of fallback ? [-0.55, 0.55] : [-0.22, 0, 0.22]) {
+  const exhausts = car.userData.effectsLayout?.exhausts || (fallback ? [-0.55, 0.55] : [-0.22, 0, 0.22])
+    .map(x => [x, fallback ? 0.45 : 0.34, fallback ? -2.2 : -2.26]);
+  for (const position of exhausts) {
     const jet = new THREE.Group();
-    jet.position.set(x, fallback ? 0.45 : 0.34, fallback ? -2.2 : -2.26);
+    jet.position.fromArray(position);
     for (const angle of [0, Math.PI / 2]) {
       const flame = new THREE.Mesh(flameGeometry, flameMaterial);
       flame.rotation.z = angle;
@@ -46,9 +48,10 @@ export function attachCarEffects(car) {
     color: 0x555555, emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.25,
   });
   const reverseGeometry = new THREE.BoxGeometry(0.22, 0.08, 0.04);
-  for (const x of [-0.65, 0.65]) {
+  const reverse = car.userData.effectsLayout?.reverse || [-0.65, 0.65].map(x => [x, 0.55, fallback ? -2.16 : -2.27]);
+  for (const position of reverse) {
     const lamp = new THREE.Mesh(reverseGeometry, reverseMaterial);
-    lamp.position.set(x, 0.55, fallback ? -2.16 : -2.27);
+    lamp.position.fromArray(position);
     root.add(lamp);
   }
   car.add(root);

@@ -2,11 +2,12 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { attachCarEffects, disposeCarEffects } from './car-effects.js';
+import { MCLAREN_ASSET, prepareMclaren } from './mclaren-model.js';
 
 /**
- * Real car model (three.js' Ferrari glTF, Draco-compressed).
+ * User-supplied 2021 McLaren 720S GT3X glTF.
  *  - loadCarAssets() loads the template once.
- *  - createCarMesh(color) returns a clone with the body recoloured.
+ *  - createCarMesh(color) returns a clone of the prepared model.
  * If the model fails to load, createCarMesh() falls back to a procedural car
  * so the game still runs.
  *
@@ -24,17 +25,18 @@ export function loadCarAssets() {
     const loader = new GLTFLoader();
     loader.setDRACOLoader(draco);
     loader.load(
-      '/assets/ferrari.glb',
+      MCLAREN_ASSET,
       (gltf) => {
-        template = gltf.scene;
-        template.traverse((o) => {
-          if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
-        });
-        draco.dispose();
-        resolve(true);
+        try {
+          template = prepareMclaren(gltf.scene);
+          resolve(true);
+        } catch (error) {
+          console.warn('McLaren model could not be prepared; using fallback car.', error);
+          resolve(false);
+        } finally { draco.dispose(); }
       },
       undefined,
-      (err) => { draco.dispose(); console.warn('Ferrari model failed to load; using fallback car.', err); resolve(false); }
+      (err) => { draco.dispose(); console.warn('McLaren model failed to load; using fallback car.', err); resolve(false); }
     );
   });
 }
@@ -44,40 +46,47 @@ export function createCarMesh(colorHex) {
 
   const outer = new THREE.Group();
   const model = template.clone(true);
-  model.rotation.y = Math.PI; // model faces -Z; turn it to face our forward (+Z)
+  const bodyPaint = model.getObjectByName('McLaren_720SGT3X_2021Coloured_Material')?.material;
 
   const brakeMaterials = [];
   const ownedMaterials = [];
   model.traverse((o) => {
     if (!o.isMesh || !o.material) return;
-    const name = o.material.name;
-    if (name === 'Body_Color') {
-      const m = o.material.clone();
-      m.color = new THREE.Color(colorHex);
-      m.metalness = 0.6;
-      m.roughness = 0.4;
-      m.envMapIntensity = 0.9;
-      o.material = m;
-      ownedMaterials.push(m);
-    } else if (name === 'Taillight_Glass') {
-      const m = o.material.clone();
-      m.emissive = new THREE.Color(0xff0000);
-      m.emissiveIntensity = 0.12;
-      o.material = m;
-      ownedMaterials.push(m);
-      brakeMaterials.push(m);
-    }
+    const materials = Array.isArray(o.material) ? o.material : [o.material];
+    const cloned = materials.map(material => material.clone());
+    o.material = Array.isArray(o.material) ? cloned : cloned[0];
+    cloned.forEach(material => {
+      const name = material.name.toLowerCase();
+      // The imported roof X/livery uses a separate dark material. Match both
+      // its colour and finish to the body so it doesn't remain a matte stripe.
+      if (name === 'phong1' && bodyPaint) {
+        const materialName = material.name;
+        material.copy(bodyPaint);
+        material.name = materialName;
+      }
+      if (name.includes('paint') || name.includes('coloured') || name === 'phong1') {
+        material.color = new THREE.Color(colorHex);
+      }
+      if (name.includes('lightemissive') || name.includes('lighta') || name.includes('taillight')) {
+        material.color.set(0x550000);
+        material.emissive = new THREE.Color(0xff0000);
+        material.emissiveIntensity = 0.12;
+        brakeMaterials.push(material);
+      }
+      ownedMaterials.push(material);
+    });
   });
 
   outer.add(model);
-  const wheels = ['wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr']
-    .map((n) => model.getObjectByName(n))
-    .filter(Boolean);
-  // steer (Y) before roll (X) so spinning wheels don't twitch when steering
-  wheels.forEach((w) => { w.rotation.order = 'YXZ'; });
-  outer.userData.wheels = wheels;
+  outer.userData.wheels = ['wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr']
+    .map(name => model.getObjectByName(name));
   outer.userData.brakeMaterials = brakeMaterials;
   outer.userData.ownedMaterials = ownedMaterials;
+  outer.userData.modelId = 'mclaren-2021';
+  outer.userData.effectsLayout = {
+    exhausts: [[-0.85, 0.32, -2.16], [-0.65, 0.32, -2.16], [0.65, 0.32, -2.16], [0.85, 0.32, -2.16]],
+    reverse: [[-0.55, 0.68, -2.1], [0.55, 0.68, -2.1]],
+  };
   attachCarEffects(outer);
   return outer;
 }

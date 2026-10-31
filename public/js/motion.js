@@ -25,7 +25,7 @@ export function renderCar(p, alpha) {
   p.renderSteer = mix(previous.steer, p.steerSmooth);
   const wheels = p.mesh.userData.wheels || [];
   for (let i = 0; i < wheels.length; i++) {
-    wheels[i].rotation.x = mix(previous.wheelSpin, p.wheelSpin);
+    (wheels[i].userData.spin || wheels[i]).rotation.x = mix(previous.wheelSpin, p.wheelSpin);
     if (i < 2) wheels[i].rotation.y = p.renderSteer * 0.4;
   }
 }

@@ -22,7 +22,7 @@ const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 4;
 
 // Per-slot identity. Index 0..3 map to player 1..4.
-const PLAYER_COLORS = ['#ff4757', '#1e90ff', '#2ed573', '#ffa502']; // red, blue, green, orange
+const PLAYER_COLORS = ['#000000', '#8F0707', '#003366', '#DE6B13']; // original black, dark red, navy, orange
 const PLAYER_NAMES = ['Red', 'Blue', 'Green', 'Orange'];
 
 const app = express();
