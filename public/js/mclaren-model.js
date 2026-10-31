@@ -47,6 +47,26 @@ export function prepareMclaren(source) {
     car.add(copy);
     batch.geometries.forEach(item => item.dispose());
   }
+  // Keep the tire mesh batched, but expose its four actual wheel centers to
+  // physics, skid marks and smoke. Empty pivots add no rendering draw calls.
+  const tire = car.children.find(mesh => mesh.material.name.includes('_Wheel1A_'));
+  if (!tire) throw new Error('McLaren tire geometry is missing');
+  const positions = tire.geometry.getAttribute('position');
+  const wheelBounds = Array.from({ length: 4 }, () => new THREE.Box3());
+  const vertex = new THREE.Vector3();
+  for (let i = 0; i < positions.count; i++) {
+    vertex.fromBufferAttribute(positions, i);
+    const index = (vertex.z < 0 ? 2 : 0) + (vertex.x > 0 ? 1 : 0);
+    wheelBounds[index].expandByPoint(vertex);
+  }
+  ['wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr'].forEach((name, index) => {
+    if (wheelBounds[index].isEmpty()) throw new Error('McLaren wheel missing: ' + name);
+    const pivot = new THREE.Group();
+    pivot.name = name;
+    wheelBounds[index].getCenter(pivot.position);
+    pivot.rotation.order = 'YXZ';
+    car.add(pivot);
+  });
   return car;
 }
 

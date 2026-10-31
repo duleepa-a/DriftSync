@@ -78,7 +78,8 @@ export function createCarMesh(colorHex) {
   });
 
   outer.add(model);
-  outer.userData.wheels = [];
+  outer.userData.wheels = ['wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr']
+    .map(name => model.getObjectByName(name));
   outer.userData.brakeMaterials = brakeMaterials;
   outer.userData.ownedMaterials = ownedMaterials;
   outer.userData.modelId = 'mclaren-2021';

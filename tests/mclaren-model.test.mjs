@@ -35,13 +35,23 @@ test('McLaren batches preserve geometry and materials without triggering scene t
       .multiply(new THREE.Matrix4().makeTranslation(-center.x, -originalBounds.min.y, -center.z)));
   const car = prepareMclaren(scene);
   assert.deepEqual(trianglesByMaterial(car), originalCounts, 'batching must retain every triangle under its material');
-  assert.ok(car.children.length <= 24, 'thousands of source parts must stay batched');
+  assert.ok(car.children.filter(child => child.isMesh).length <= 24, 'thousands of source parts must stay batched');
+  for (const [name, front, left] of [
+    ['wheel_fl', true, true], ['wheel_fr', true, false],
+    ['wheel_rl', false, true], ['wheel_rr', false, false],
+  ]) {
+    const wheel = car.getObjectByName(name);
+    assert.ok(wheel?.isGroup, name + ' contact point must exist');
+    assert.equal(wheel.position.z > 0, front);
+    assert.equal(wheel.position.x < 0, left);
+    assert.ok(wheel.position.y > 0.2 && wheel.position.y < 0.5);
+  }
   const bounds = new THREE.Box3().setFromObject(car);
   assert.ok(bounds.min.distanceTo(expectedBounds.min) < 0.00001, 'preserve the original placement');
   assert.ok(bounds.max.distanceTo(expectedBounds.max) < 0.00001, 'preserve the original size');
-  const glass = car.children.filter(mesh => /Window|LightEmissive/.test(mesh.material.name));
+  const glass = car.children.filter(mesh => mesh.isMesh && /Window|LightEmissive/.test(mesh.material.name));
   assert.equal(glass.length, 3);
-  for (const mesh of car.children) assert.equal(mesh.material.transmission, 0);
+  for (const mesh of car.children.filter(child => child.isMesh)) assert.equal(mesh.material.transmission, 0);
   for (const mesh of glass) {
     assert.equal(mesh.material.transparent, true);
     assert.ok(mesh.material.opacity > 0 && mesh.material.opacity < 1, 'keep the authored tint/transparency');
