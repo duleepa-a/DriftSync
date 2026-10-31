@@ -482,7 +482,7 @@ function layoutHud() {
       <div class="hud-top">
         <div class="hud-stat left"><span class="lbl">POS</span><span class="num" data-pos>1</span><span class="den" data-posden>|${ps.length}</span></div>
         <div class="hud-driver">
-          <div class="hud-name" style="color:${p.color}">${escapeHtml(p.name)}</div>
+          <div class="hud-name" style="color:color-mix(in srgb, ${p.color} 55%, white)">${escapeHtml(p.name)}</div>
           <div class="hud-bar"><i data-bar style="background:${p.color}"></i></div>
         </div>
         <div class="hud-stat right"><span class="lbl">LAP</span><span class="num" data-lap>1</span><span class="den">|${TOTAL_LAPS}</span></div>
@@ -635,18 +635,18 @@ function updateLobby() {
   const ps = activePlayers();
   const bySlot = new Map(ps.map((p) => [p.slot, p]));
   let html = '';
-  const colors = ['#ff4757', '#1e90ff', '#2ed573', '#ffa502'];
+  const colors = ['#000000', '#8F0707', '#003366', '#DE6B13'];
   const names = ['Player 1', 'Player 2', 'Player 3', 'Player 4'];
   for (let s = 0; s < 4; s++) {
     const p = bySlot.get(s);
     if (p) {
       html += `<div class="pslot filled">
-        <div class="pname" style="color:${colors[s]}">${escapeHtml(p.name)}</div>
+        <div class="pname" style="color:color-mix(in srgb, ${p.color} 55%, white)">${escapeHtml(p.name)}</div>
         <div class="pstat">${p.ready ? '✓ Ready' : 'Connected'}</div>
       </div>`;
     } else {
       html += `<div class="pslot empty">
-        <div class="pstat" style="color:${colors[s]}">waiting…</div>
+        <div class="pstat" style="color:color-mix(in srgb, ${colors[s]} 55%, white)">waiting…</div>
       </div>`;
     }
   }

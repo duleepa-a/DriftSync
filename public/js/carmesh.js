@@ -46,6 +46,7 @@ export function createCarMesh(colorHex) {
 
   const outer = new THREE.Group();
   const model = template.clone(true);
+  const bodyPaint = model.getObjectByName('McLaren_720SGT3X_2021Coloured_Material')?.material;
 
   const brakeMaterials = [];
   const ownedMaterials = [];
@@ -56,7 +57,14 @@ export function createCarMesh(colorHex) {
     o.material = Array.isArray(o.material) ? cloned : cloned[0];
     cloned.forEach(material => {
       const name = material.name.toLowerCase();
-      if (name.includes('paint') || name.includes('coloured')) {
+      // The imported roof X/livery uses a separate dark material. Match both
+      // its colour and finish to the body so it doesn't remain a matte stripe.
+      if (name === 'phong1' && bodyPaint) {
+        const materialName = material.name;
+        material.copy(bodyPaint);
+        material.name = materialName;
+      }
+      if (name.includes('paint') || name.includes('coloured') || name === 'phong1') {
         material.color = new THREE.Color(colorHex);
       }
       if (name.includes('lightemissive') || name.includes('lighta') || name.includes('taillight')) {

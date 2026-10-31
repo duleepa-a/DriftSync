@@ -237,7 +237,7 @@ try {
   document.getElementById('lobby').classList.add('hidden');
   for (let count = 1; count <= 4; count++) {
     const i = count - 1;
-    addPlayer({ id: 'test-' + i, slot: i, name: 'Test ' + count, color: ['#ff4757', '#1e90ff', '#2ed573', '#ffa502'][i] });
+    addPlayer({ id: 'test-' + i, slot: i, name: 'Test ' + count, color: ['#000000', '#8F0707', '#003366', '#DE6B13'][i] });
     spawnCars(); layoutHud();
     for (const player of G.players.values()) {
       if (player.mesh.userData.modelId !== 'mclaren-2021') throw new Error('McLaren asset failed to load; procedural fallback is active');

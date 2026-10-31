@@ -1,10 +1,10 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --p0: #ff4757; /* red */
-  --p1: #1e90ff; /* blue */
-  --p2: #2ed573; /* green */
-  --p3: #ffa502; /* orange */
+  --p0: #000000; /* original black */
+  --p1: #8F0707; /* dark red */
+  --p2: #003366; /* navy */
+  --p3: #DE6B13; /* orange */
 }
 
 html, body {
