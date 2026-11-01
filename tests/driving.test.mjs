@@ -27,15 +27,26 @@ const { updateCar } = await import(`data:text/javascript,${encodeURIComponent(ph
 const motionSource = readFileSync(resolve(root, 'public/js/motion.js'), 'utf8');
 const { resetMotion, savePreviousPose, renderCar } = await import(`data:text/javascript,${encodeURIComponent(motionSource)}`);
 
-test('forest and grandstands clear the road, and scenery LOD resets for each camera', () => {
+function mockSceneryDocument() {
   const context = new Proxy({}, { get: () => () => {} });
-  globalThis.document = { createElement: () => ({ getContext: () => context }) };
+  globalThis.document = {
+    createElement: () => ({ width: 0, height: 0, getContext: () => context }),
+    // Image decoding is verified in Chrome; these tests inspect geometry.
+    createElementNS: () => ({ addEventListener() {}, removeEventListener() {} }),
+  };
+}
+
+test('forest and grandstands clear the road, and scenery LOD resets for each camera', () => {
+  mockSceneryDocument();
   const scene = new THREE.Scene(), track = buildTrack(scene);
   const forest = scene.getObjectByName('instanced-pine-forest');
   assert.ok(forest.isInstancedMesh && forest.count >= 700);
   assert.equal(forest.geometry.groups.length, 0, 'all tree parts must use one draw call');
   assert.ok(!Array.isArray(forest.material));
-  assert.ok(forest.count * forest.geometry.attributes.position.count / 3 < 150000);
+  assert.equal(forest.geometry.index.count / 3, 2, 'each tree uses just one billboard');
+  assert.ok(forest.material.alphaTest > 0 && forest.material.depthWrite && !forest.material.transparent);
+  const variants = forest.geometry.getAttribute('treeVariant');
+  assert.equal(new Set(variants.array.slice(0, forest.count)).size, 4, 'use all four tree silhouettes');
   const matrix = new THREE.Matrix4(), position = new THREE.Vector3();
   for (let i = 0; i < forest.count; i++) {
     forest.getMatrixAt(i, matrix);
@@ -65,8 +76,7 @@ test('forest and grandstands clear the road, and scenery LOD resets for each cam
 });
 
 test('nitro stations have a full boost of gentle road ahead and stay clear of the grid and walls', () => {
-  const context = new Proxy({}, { get: () => () => {} });
-  globalThis.document = { createElement: () => ({ getContext: () => context }) };
+  mockSceneryDocument();
   const track = buildTrack(new THREE.Scene());
   const pickups = createNitroPickups(track);
   const stations = [...new Set(pickups.map(p => p.index))];
@@ -94,8 +104,7 @@ test('nitro stations have a full boost of gentle road ahead and stay clear of th
 });
 
 test('road height changes continuously between samples, including the lap seam', () => {
-  const context = new Proxy({}, { get: () => () => {} });
-  globalThis.document = { createElement: () => ({ getContext: () => context }) };
+  mockSceneryDocument();
   const track = buildTrack(new THREE.Scene());
   for (let i = 0; i < track.samples.length; i++) {
     const a = track.samples[i], b = track.samples[(i + 1) % track.samples.length];
@@ -137,9 +146,34 @@ test('rendered motion stays continuous at different refresh rates without moving
   }
 });
 
+test('ground shadow follows road height and slope without inheriting car lean', () => {
+  const mesh = new THREE.Group();
+  mesh.rotation.order = 'YXZ';
+  const shadow = new THREE.Object3D();
+  shadow.rotation.order = 'ZXY';
+  shadow.position.z = -0.2;
+  mesh.add(shadow);
+  mesh.userData.groundShadow = shadow;
+  const p = {
+    pos: new THREE.Vector3(), groundY: 0, surfaceY: 0,
+    heading: 0, pitch: 0, roll: 0, shadowSlopePitch: 0,
+    wheelSpin: 0, steerSmooth: 0, mesh,
+  };
+  resetMotion(p);
+  p.groundY = 1.8; p.surfaceY = 2;
+  p.heading = 0.7; p.pitch = 0.18; p.roll = 0.06;
+  p.shadowSlopePitch = 0.04;
+  renderCar(p, 1);
+  mesh.updateMatrixWorld(true);
+  const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(shadow.getWorldQuaternion(new THREE.Quaternion()));
+  const roadNormal = new THREE.Vector3(0, 1, 0).applyEuler(new THREE.Euler(0.04, 0.7, 0, 'YXZ'));
+  assert.ok(normal.angleTo(roadNormal) < 1e-6, 'body pitch and roll must not tilt the shadow');
+  assert.ok(Math.abs(shadow.getWorldPosition(new THREE.Vector3()).y - 2.06) < 0.02,
+    'shadow must stay at the road surface when the car body lags behind it');
+});
+
 test('default driving launches and stays within the real track', () => {
-  const context = new Proxy({}, { get: () => () => {} });
-  globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => context }) };
+  mockSceneryDocument();
   const track = buildTrack(new THREE.Scene());
 
   for (const spawn of track.startPositions) {
