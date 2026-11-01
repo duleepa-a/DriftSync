@@ -8,8 +8,10 @@ import { MCLAREN_ASSET } from '/js/mclaren-model.js';
 const report = { backend: 'Chrome SwiftShader (software rendering; timings are not hardware FPS)', profiles: [] };
 try {
   const deadline = performance.now() + 30000;
-  while ((!G.assetsReady || !G.environmentReady) && performance.now() < deadline) await new Promise(r => setTimeout(r, 50));
-  if (!G.assetsReady || !G.environmentReady) throw new Error('Assets did not load');
+  const forest = scene.getObjectByName('instanced-pine-forest');
+  const scenery = scene.getObjectByName('track-scenery');
+  while ((!G.assetsReady || !G.environmentReady || !forest.userData.textureReady || !scenery.userData.forestDetailsReady) && performance.now() < deadline) await new Promise(r => setTimeout(r, 50));
+  if (!G.assetsReady || !G.environmentReady || !forest.userData.textureReady || !scenery.userData.forestDetailsReady) throw new Error('Assets did not load');
   addPlayer({ id: 'profile', slot: 0, name: 'Profile', color: '#ff4757' });
   spawnCars(); layoutHud();
   document.getElementById('lobby').classList.add('hidden');

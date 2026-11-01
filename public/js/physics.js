@@ -77,9 +77,11 @@ export function updateCar(p, dt, track, { dropSkid, onGate }) {
   p.skidding = lockup || wallImpact;
 
   const groundY = info.groundY;
+  p.surfaceY = groundY;
   p.groundY += (groundY - p.groundY) * Math.min(1, dt * 9);
   const aheadInfo = track.nearestInfo(ahead.set(p.pos.x + fx * 5, 0, p.pos.z + fz * 5), p.sampleIndex);
   const slopePitch = -Math.atan2(aheadInfo.groundY - groundY, 5);
+  p.shadowSlopePitch = slopePitch;
   const accelEst = (p.speed - p.prevSpeed) / Math.max(dt, 1e-3);
   p.prevSpeed = p.speed;
   const pitch = clamp(slopePitch + clamp(-accelEst * 0.004, -0.05, 0.05), -0.3, 0.3);

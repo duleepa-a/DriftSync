@@ -14,27 +14,33 @@ export function attachCarEffects(car) {
       void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: `uniform float time; varying vec2 vUv;
       void main() {
-        float t = vUv.y;
-        float ripple = sin(t * 28.0 - time * 23.0) * sin(t * 17.0 + time * 11.0);
-        float radius = (1.0 - t) * (0.44 + ripple * 0.07);
-        float x = abs(vUv.x - 0.5 + sin(t * 16.0 - time * 19.0) * t * 0.035);
-        float alpha = (1.0 - smoothstep(radius * 0.35, max(radius, 0.001), x))
-          * (1.0 - smoothstep(0.75, 1.0, t));
-        float core = (1.0 - smoothstep(0.0, max(radius * 0.55, 0.001), x)) * (1.0 - t);
-        vec3 color = mix(vec3(0.015, 0.22, 1.8), vec3(0.65, 1.8, 2.8), core);
-        gl_FragColor = vec4(color, alpha * 0.85);
+        float t = vUv.y; // zero at the outlet, one at the flame tip
+        float turbulence = sin(t * 35.0 - time * 29.0) * 0.018
+          + sin(t * 67.0 + time * 43.0) * 0.009;
+        float centre = 0.5 + turbulence * t;
+        float width = mix(0.35, 0.025, pow(t, 0.8));
+        float radial = abs(vUv.x - centre);
+        float sheath = 1.0 - smoothstep(width * 0.55, width * 1.15, radial);
+        float core = (1.0 - smoothstep(0.0, width * 0.38, radial))
+          * pow(1.0 - t, 1.4);
+        float alpha = sheath * (1.0 - smoothstep(0.52, 1.0, t))
+          * (0.45 + 0.55 * core);
+        vec3 blue = vec3(0.015, 0.18, 1.1);
+        vec3 hot = vec3(0.42, 1.15, 2.0);
+        gl_FragColor = vec4(mix(blue, hot, core), alpha * 0.75);
       }`,
   });
   // The car faces +Z; exhaust jets extend behind it along -Z.
-  const flameGeometry = new THREE.PlaneGeometry(0.32, 1.0);
+  const flameGeometry = new THREE.PlaneGeometry(0.38, 0.72);
   flameGeometry.rotateX(-Math.PI / 2);
-  flameGeometry.translate(0, 0, -0.5);
+  flameGeometry.translate(0, 0, -0.36);
   const fallback = car.userData.isFallback;
   const exhausts = car.userData.effectsLayout?.exhausts || (fallback ? [-0.55, 0.55] : [-0.22, 0, 0.22])
     .map(x => [x, fallback ? 0.45 : 0.34, fallback ? -2.2 : -2.26]);
-  for (const position of exhausts) {
+  for (const [index, position] of exhausts.entries()) {
     const jet = new THREE.Group();
     jet.position.fromArray(position);
+    jet.userData.phase = index * 1.7;
     for (const angle of [0, Math.PI / 2]) {
       const flame = new THREE.Mesh(flameGeometry, flameMaterial);
       flame.rotation.z = angle;
@@ -69,8 +75,11 @@ export function updateCarEffects(p, dt) {
   effects.time += dt;
   effects.flames.visible = boosting;
   effects.flameMaterial.uniforms.time.value = effects.time;
-  const pulse = 1 + Math.sin(effects.time * 31) * 0.12;
-  for (const jet of effects.flames.children) jet.scale.z = pulse;
+  for (const jet of effects.flames.children) {
+    const phase = jet.userData.phase;
+    jet.scale.z = 0.95 + Math.sin(effects.time * 31 + phase) * 0.09
+      + Math.sin(effects.time * 47 + phase * 2) * 0.04;
+  }
   for (const material of p.mesh.userData.brakeMaterials || []) {
     // Saturated red has low luminance: use an HDR emitter so only the lamp
     // crosses the bloom threshold, rather than making the asphalt bloom too.

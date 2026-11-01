@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
-// All assets are generated once. No image requests or per-tree update loop.
+// Scenery is built once; the forest shares one local texture atlas and has no
+// per-tree JavaScript update loop.
 function randomSequence(seed) {
   return () => {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
@@ -51,18 +52,69 @@ export function buildTrackScenery(scene, samples, tangents, halfWidth, terrainHe
 }
 
 function buildForest(root, samples, tangents, halfWidth, terrainHeight, stands) {
-  const geometry = mergeColoured([
-    [new THREE.CylinderGeometry(0.28, 0.55, 7, 6).translate(0, 3.5, 0), 0x675341],
-    [new THREE.ConeGeometry(3.8, 7, 8).translate(0, 6.5, 0), 0x294e3b],
-    [new THREE.ConeGeometry(3.1, 6, 8).translate(0, 10, 0), 0x345e46],
-    [new THREE.ConeGeometry(2.1, 5.5, 8).translate(0, 13, 0), 0x426c50],
-  ]);
-  const trees = new THREE.InstancedMesh(geometry, new THREE.MeshStandardMaterial({
-    vertexColors: true, roughness: 1, metalness: 0, envMapIntensity: 0.65,
-  }), samples.length * 2);
+  const capacity = samples.length * 2;
+  // Four photographic cutouts share two triangles per tree. The small offset
+  // below the pivot sinks the transparent bottom padding into the terrain.
+  const geometry = new THREE.PlaneGeometry(10, 16).translate(0, 7.5, 0);
+  const variants = new Float32Array(capacity), mirrors = new Float32Array(capacity);
+  geometry.setAttribute('treeVariant', new THREE.InstancedBufferAttribute(variants, 1));
+  geometry.setAttribute('treeMirror', new THREE.InstancedBufferAttribute(mirrors, 1));
+  const nearFades = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1);
+  nearFades.setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute('treeNear', nearFades);
+  const material = new THREE.MeshBasicMaterial({ alphaTest: 0.4, side: THREE.DoubleSide });
+  material.onBeforeCompile = shader => {
+    shader.vertexShader = 'attribute float treeVariant;\nattribute float treeMirror;\nattribute float treeNear;\nvarying float vTreeNear;\n' + shader.vertexShader;
+    shader.vertexShader = shader.vertexShader.replace('#include <uv_vertex>', `
+      #include <uv_vertex>
+      vMapUv.x = mix(vMapUv.x, 1.0 - vMapUv.x, treeMirror);
+      // Keep sampling within this quadrant, including at the card edges.
+      vMapUv = (clamp(vMapUv, vec2(0.002), vec2(0.998))
+        + vec2(mod(treeVariant, 2.0), floor(treeVariant / 2.0))) * 0.5;
+    `);
+    shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', `
+      vec3 treeBase = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+      vec3 facing = cameraPosition - treeBase;
+      vec3 treeRight = normalize(vec3(facing.z + 0.00001, 0.0, -facing.x));
+      float treeWidth = length(instanceMatrix[0].xyz);
+      float treeHeight = length(instanceMatrix[1].xyz);
+      vec3 treePosition = treeBase + treeRight * position.x * treeWidth
+        + vec3(0.0, position.y * treeHeight, 0.0);
+      vec4 mvPosition = viewMatrix * vec4(treePosition, 1.0);
+      gl_Position = projectionMatrix * mvPosition;
+      vTreeNear = treeNear;
+      if (treeNear >= 0.999) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    `);
+    shader.fragmentShader = 'varying float vTreeNear;\n' + shader.fragmentShader;
+    shader.fragmentShader = shader.fragmentShader.replace('#include <clipping_planes_fragment>', `
+      #include <clipping_planes_fragment>
+      if (vTreeNear > 0.0) {
+        float coverage = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+        if (coverage < vTreeNear) discard;
+      }
+    `);
+  };
+  material.customProgramCacheKey = () => 'pine-cutout-billboards-v2';
+  const trees = new THREE.InstancedMesh(geometry, material, capacity);
   trees.name = 'instanced-pine-forest';
-  // Trunks and three foliage tiers share one draw call per viewport. Avoid a
-  // second forest pass in the shadow map; the barriers already shade the road.
+  // Alpha testing writes depth without transparent sorting. Each viewport uses
+  // its own camera automatically; trees remain upright when the camera pitches.
+  // Hide unloaded cards so there is no flash of solid rectangles on startup.
+  trees.visible = false;
+  trees.userData.textureReady = false;
+  trees.userData.nearCandidates = [];
+  material.map = new THREE.TextureLoader().load('/assets/pine-tree-atlas.webp', () => {
+    trees.userData.textureReady = true;
+    trees.visible = true;
+  }, undefined, error => {
+    trees.userData.textureError = true;
+    console.warn('Forest texture failed to load.', error);
+  });
+  material.map.name = 'pine-tree-atlas-2x2';
+  material.map.colorSpace = THREE.SRGBColorSpace;
+  material.map.anisotropy = 4;
+  // Avoid a second forest pass in the shadow map.
+  const styleRandom = randomSequence(416);
   const random = randomSequence(7842), matrix = new THREE.Matrix4();
   const rotation = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
   const position = new THREE.Vector3(), scale = new THREE.Vector3(), tint = new THREE.Color();
@@ -82,7 +134,7 @@ function buildForest(root, samples, tangents, halfWidth, terrainHeight, stands) 
           const dx = x - stand.position.x, dz = z - stand.position.z;
           const localX = dx * stand.userData.right.x + dz * stand.userData.right.z;
           const localZ = dx * stand.userData.outward.x + dz * stand.userData.outward.z;
-          return Math.abs(localX) < 29 && localZ > -7 && localZ < 23;
+          return Math.abs(localX) < 32 && localZ > -10 && localZ < 26;
         })) continue;
         const size = 0.85 + random() * 0.65;
         position.set(x, terrainHeight(road.distance, road.height) - 0.15, z);
@@ -90,7 +142,11 @@ function buildForest(root, samples, tangents, halfWidth, terrainHeight, stands) 
         scale.set(size, size * (1.1 + random() * 0.35), size);
         matrix.compose(position, rotation, scale);
         trees.setMatrixAt(count, matrix);
-        tint.setHSL(0.29 + random() * 0.04, 0.10, 0.68 + random() * 0.18);
+        // Sparse choices along the closest row; distant rows always use cards.
+        if (row === 0 && i % 12 === 0) trees.userData.nearCandidates.push(count);
+        variants[count] = Math.floor(styleRandom() * 4);
+        mirrors[count] = styleRandom() < 0.5 ? 0 : 1;
+        tint.setHSL(0.29 + random() * 0.04, 0.08, 0.88 + random() * 0.1);
         trees.setColorAt(count++, tint);
       }
     }

@@ -18,6 +18,42 @@ import { MCLAREN_ASSET, prepareMclaren } from './mclaren-model.js';
 
 let template = null;
 
+function attachCarGroundShadow(car) {
+  // Sunset shadows stretch far from the tires. Keep the real sun shadow, and
+  // add a small ground contact shade with only two triangles and no texture.
+  const shadow = new THREE.Mesh(
+    new THREE.PlaneGeometry(4.7, 8.0),
+    new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, toneMapped: false,
+      vertexShader: `varying vec2 vUv;
+        void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `varying vec2 vUv;
+        void main() {
+          vec2 p = (vUv - 0.5) * 2.0;
+          float radius2 = dot(p, p);
+          float edge = 1.0 - smoothstep(0.72, 1.0, max(abs(p.x), abs(p.y)));
+          float alpha = 0.70 * exp(-2.4 * radius2) * edge;
+          gl_FragColor = vec4(0.0, 0.0, 0.0, alpha);
+        }`,
+    })
+  );
+  shadow.name = 'car-ground-shadow';
+  shadow.rotation.order = 'ZXY';
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.set(0, 0.05, -0.2);
+  car.add(shadow);
+  car.userData.groundShadow = shadow;
+}
+
+function disposeCarGroundShadow(car) {
+  const shadow = car.userData.groundShadow;
+  if (!shadow) return;
+  car.remove(shadow);
+  shadow.geometry.dispose();
+  shadow.material.dispose();
+  delete car.userData.groundShadow;
+}
+
 export function loadCarAssets() {
   return new Promise((resolve) => {
     const draco = new DRACOLoader();
@@ -84,16 +120,19 @@ export function createCarMesh(colorHex) {
   outer.userData.ownedMaterials = ownedMaterials;
   outer.userData.modelId = 'mclaren-2021';
   outer.userData.effectsLayout = {
-    exhausts: [[-0.85, 0.32, -2.16], [-0.65, 0.32, -2.16], [0.65, 0.32, -2.16], [0.85, 0.32, -2.16]],
+    // The two round outlets sit between the rear lamps, above the diffuser.
+    exhausts: [[-0.27, 0.70, -2.35], [0.27, 0.70, -2.35]],
     reverse: [[-0.55, 0.68, -2.1], [0.55, 0.68, -2.1]],
   };
   attachCarEffects(outer);
+  attachCarGroundShadow(outer);
   return outer;
 }
 
 export function disposeCarMesh(car) {
   if (!car) return;
   disposeCarEffects(car);
+  disposeCarGroundShadow(car);
   if (car.userData.isFallback) {
     const resources = new Set();
     car.traverse((object) => {
@@ -144,5 +183,6 @@ function createFallbackCar(colorHex) {
   car.userData.brakeMaterials = [brakeMat];
   car.userData.isFallback = true;
   attachCarEffects(car);
+  attachCarGroundShadow(car);
   return car;
 }

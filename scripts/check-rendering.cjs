@@ -9,6 +9,7 @@ const root = path.resolve(__dirname, '..');
 const chrome = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const scale = process.argv.includes('--dpr=2') ? 2 : 1;
 const profileCar = process.argv.includes('--profile-car');
+const profileForest = process.argv.includes('--profile-forest');
 const app = express();
 let browser, timeout, received = false, debugOrigin;
 app.post('/capture-ui/:name', async (req, res) => {
@@ -44,7 +45,7 @@ app.post('/render-result', express.json({ limit: '32mb' }), (req, res) => {
     delete report.screenshot;
     report.screenshotPath = screenshotPath;
   }
-  for (const key of ['nitroScreenshot', 'boostScreenshot', 'brakeReverseScreenshot', 'sceneryScreenshot', 'smokeScreenshot']) {
+  for (const key of ['nitroScreenshot', 'boostScreenshot', 'brakeReverseScreenshot', 'sceneryScreenshot', 'smokeScreenshot', 'exhaustScreenshot', 'shadowOffScreenshot']) {
     if (!report[key]) continue;
     const screenshotPath = path.join(os.tmpdir(), 'driftsync-' + key + '-dpr' + scale + '.png');
     fs.writeFileSync(screenshotPath, Buffer.from(report[key].split(',')[1], 'base64'));
@@ -59,7 +60,7 @@ app.post('/render-result', express.json({ limit: '32mb' }), (req, res) => {
 app.get('/', (_req, res) => {
   const html = fs.readFileSync(path.join(root, 'public/index.html'), 'utf8')
     .replace('<script src="/socket.io/socket.io.js"></script>', '<script>window.io = () => ({ on() {}, emit() {} });</script>')
-    .replace(/src="js\/host\.js[^"]*"/, 'src="/' + (profileCar ? 'profile-car.mjs' : 'render-check.mjs') + '"');
+    .replace(/src="js\/host\.js[^"]*"/, 'src="/' + (profileCar ? 'profile-car.mjs' : profileForest ? 'profile-forest.mjs' : 'render-check.mjs') + '"');
   res.type('html').send(html);
 });
 app.get('/js/host.js', (_req, res) => {
@@ -70,6 +71,7 @@ app.get('/js/host.js', (_req, res) => {
   res.type('js').send(source);
 });
 app.get('/profile-car.mjs', (_req, res) => res.sendFile(path.join(__dirname, 'profile-car.mjs')));
+app.get('/profile-forest.mjs', (_req, res) => res.sendFile(path.join(__dirname, 'profile-forest.mjs')));
 app.get('/render-check.mjs', (_req, res) => res.type('js').send(`
 import { G, scene, renderer, composer, renderPass, bloomPass, colorGradePass, addPlayer, removePlayer, backToLobby, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera, emitCarSmoke, updateSmoke, smokePool, skidMesh } from '/js/host.js';
 import { resetMotion, renderCar } from '/js/motion.js';
@@ -80,7 +82,7 @@ report.id = 'render-result';
 document.body.appendChild(report);
 const cases = [];
 const motion = [];
-let screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, smokeScreenshot, nitro, bloom;
+let screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, smokeScreenshot, exhaustScreenshot, shadowOffScreenshot, carShadow, nitro, bloom;
 let shaderError;
 renderer.debug.onShaderError = (gl, program, vertex, fragment) => {
   shaderError = [gl.getProgramInfoLog(program), gl.getShaderInfoLog(vertex), gl.getShaderInfoLog(fragment)].join('\\n');
@@ -214,8 +216,13 @@ async function checkFinishing() {
 }
 try {
   const deadline = performance.now() + 30000;
-  while ((!G.assetsReady || !G.environmentReady) && performance.now() < deadline) await new Promise(r => setTimeout(r, 50));
+  const forest = scene.getObjectByName('instanced-pine-forest');
+  const sceneryRoot = scene.getObjectByName('track-scenery');
+  while ((!G.assetsReady || !G.environmentReady || !forest.userData.textureReady || !sceneryRoot.userData.forestDetailsReady) && performance.now() < deadline) await new Promise(r => setTimeout(r, 50));
   if (!G.assetsReady) throw new Error('Car assets did not load');
+  if (!forest.userData.textureReady || !forest.visible || !forest.material.map.image?.width) throw new Error('Realistic tree atlas failed to load');
+  if (!sceneryRoot.userData.forestDetailsReady) throw new Error('Optimized 3D pines failed to load');
+  if (forest.material.transparent || !forest.material.depthWrite || forest.material.alphaTest <= 0) throw new Error('Forest must use depth-tested cutouts');
   if (!G.environmentReady || scene.environment?.name !== 'sunset-environment') throw new Error('Sunset HDRI did not load');
   if (!scene.background?.isTexture || scene.background === scene.environment) throw new Error('Matching sunset sky backdrop is missing');
   const { sun, sunHelper } = G.track;
@@ -245,12 +252,55 @@ try {
       player.mesh.traverse(object => {
         if (object.isMesh && object.material.transmission > 0) throw new Error('Car glass re-enabled an extra scene transmission pass');
       });
+      const groundShadow = player.mesh.getObjectByName('car-ground-shadow');
+      if (!groundShadow?.material.isShaderMaterial || groundShadow.geometry.index.count !== 6 || groundShadow.castShadow) {
+        throw new Error('Car ground shadow is missing or too costly');
+      }
     }
     await new Promise(requestAnimationFrame);
     renderSplit();
+    const details = sceneryRoot.userData.forestDetails;
+    if (details.selected.length > 8 || details.meshes.length !== 2) throw new Error('3D forest exceeded its render budget');
+    if (count === 1 && !details.selected.length) throw new Error('No 3D pines visible near the start');
     inspectFrame(count + ' players', count);
     if (!bloomPass.enabled || renderPass.camera !== [...G.players.values()].at(-1).camera) throw new Error('Composer did not render bloom for every player');
-    if (count === 1) sceneryScreenshot = renderer.domElement.toDataURL('image/png');
+    if (count === 1) {
+      sceneryScreenshot = renderer.domElement.toDataURL('image/png');
+      const p = [...G.players.values()][0];
+      const casters = [];
+      p.mesh.traverse(object => { if (object.isMesh && object.castShadow) casters.push(object); });
+      if (!casters.length) throw new Error('Car is not casting its sun shadow');
+      const groundShadow = p.mesh.userData.groundShadow;
+      const gl = renderer.getContext();
+      const width = gl.drawingBufferWidth, height = gl.drawingBufferHeight;
+      const withShadow = new Uint8Array(width * height * 4);
+      const withoutShadow = new Uint8Array(withShadow.length);
+      gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, withShadow);
+      groundShadow.visible = false;
+      renderSplit();
+      shadowOffScreenshot = renderer.domElement.toDataURL('image/png');
+      gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, withoutShadow);
+      groundShadow.visible = true;
+      let changed = 0, maxDelta = 0;
+      for (let pixel = 0; pixel < withShadow.length; pixel += 4) {
+        const delta = Math.abs(withShadow[pixel] - withoutShadow[pixel]);
+        if (delta > 2) changed++;
+        maxDelta = Math.max(maxDelta, delta);
+      }
+      if (changed < 50) throw new Error('Car ground shadow is not visible on the road: ' + JSON.stringify({ changed, maxDelta }));
+      carShadow = { changed, maxDelta };
+      renderSplit();
+      const oldSpeed = p.speed, oldNitro = p.nitroTime;
+      p.speed = 46; p.nitroTime = 1;
+      updateCarEffects(p, 1 / 60);
+      p.nitroVisual = 0;
+      p.camera.position.copy(p.mesh.localToWorld(new THREE.Vector3(0, 1.9, -6)));
+      p.camera.lookAt(p.mesh.localToWorld(new THREE.Vector3(0, 0.7, -2.2)));
+      renderSplit();
+      exhaustScreenshot = renderer.domElement.toDataURL('image/png');
+      p.speed = oldSpeed; p.nitroTime = oldNitro; p.nitroVisual = 0;
+      updateCarEffects(p, 1 / 60); placeCamera(p, true);
+    }
     if (count <= 2) {
       // Exercise the production fixed-step loop at a display rate above 60 Hz.
       const players = [...G.players.values()];
@@ -391,11 +441,10 @@ try {
       }
     }
   }
-  const forest = scene.getObjectByName('instanced-pine-forest');
   const stands = scene.getObjectByName('track-scenery').children.filter(child => child.isLOD);
-  const scenery = { trees: forest.count, forestTriangles: forest.count * forest.geometry.attributes.position.count / 3, grandstands: stands.length };
+  const scenery = { trees: forest.count, forestTriangles: forest.count * forest.geometry.index.count / 3, treeAtlasLoaded: forest.userData.textureReady, nearTreeCandidates: forest.userData.nearCandidates.length, nearTreeLimit: 8, nearTreeMaterials: sceneryRoot.userData.forestDetails.meshes.length, grandstands: stands.length };
   const finishing = await checkFinishing();
-  report.textContent = JSON.stringify({ devicePixelRatio, motion, nitro, bloom, scenery, finishing, cases, screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, smokeScreenshot });
+  report.textContent = JSON.stringify({ devicePixelRatio, motion, nitro, bloom, carShadow, scenery, finishing, cases, screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, smokeScreenshot, exhaustScreenshot, shadowOffScreenshot });
 } catch (error) { report.textContent = JSON.stringify({ error: error.stack }); }
 await fetch('/render-result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: report.textContent });
 `));

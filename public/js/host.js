@@ -6,6 +6,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { buildTrack } from './track.js';
+import { loadForestDetails } from './forest-lod.js';
 import { createSunsetSky } from './sky.js';
 import { createCarMesh, disposeCarMesh, loadCarAssets } from './carmesh.js';
 import { updateCarEffects } from './car-effects.js';
@@ -151,6 +152,8 @@ new RGBELoader().load('/assets/venice_sunset_1k.hdr', (hdr) => {
 });
 
 G.track = buildTrack(scene);
+const trackScenery = scene.getObjectByName('track-scenery');
+loadForestDetails(scene);
 G.nitroPickups = createNitroPickups(G.track);
 const nitroVisuals = createNitroVisuals(scene, G.nitroPickups);
 let nitroVisualTime = 0;
@@ -276,6 +279,11 @@ function spawnPlayer(p) {
   const ni = G.track.nearestInfo(p.pos, 0);
   p.sampleIndex = ni.index;
   p.groundY = ni.groundY;
+  p.surfaceY = ni.groundY;
+  const shadowAhead = G.track.nearestInfo(new THREE.Vector3(
+    p.pos.x + Math.sin(p.heading) * 5, 0, p.pos.z + Math.cos(p.heading) * 5
+  ), ni.index);
+  p.shadowSlopePitch = -Math.atan2(shadowAhead.groundY - ni.groundY, 5);
   p.mesh.position.set(p.pos.x, p.groundY, p.pos.z);
   p.mesh.rotation.set(0, p.heading, 0);
   resetMotion(p);
@@ -427,6 +435,7 @@ function renderView(camera, rect, index) {
   renderer.setScissorTest(true);
   camera.aspect = rect.w / rect.h;
   camera.updateProjectionMatrix();
+  trackScenery.userData.forestDetails?.update(camera);
   if (POST) {
     renderPass.camera = camera;
     colorGradePass.uniforms.uView.value = index;
