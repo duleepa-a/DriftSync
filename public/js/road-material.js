@@ -10,11 +10,16 @@ function hash(x, y) {
   return ((n ^ (n >>> 16)) >>> 0) / 4294967295;
 }
 function tileNoise(u, v, cells) {
-  const x = u * cells, y = v * cells;
-  const ix = Math.floor(x), iy = Math.floor(y);
-  const fx = smooth(0, 1, x - ix), fy = smooth(0, 1, y - iy);
-  const a = hash(ix % cells, iy % cells), b = hash((ix + 1) % cells, iy % cells);
-  const c = hash(ix % cells, (iy + 1) % cells), d = hash((ix + 1) % cells, (iy + 1) % cells);
+  const x = u * cells,
+    y = v * cells;
+  const ix = Math.floor(x),
+    iy = Math.floor(y);
+  const fx = smooth(0, 1, x - ix),
+    fy = smooth(0, 1, y - iy);
+  const a = hash(ix % cells, iy % cells),
+    b = hash((ix + 1) % cells, iy % cells);
+  const c = hash(ix % cells, (iy + 1) % cells),
+    d = hash((ix + 1) % cells, (iy + 1) % cells);
   return (a + (b - a) * fx) * (1 - fy) + (c + (d - c) * fx) * fy;
 }
 function texture(data, width, height, name, colorSpace = THREE.NoColorSpace) {
@@ -39,8 +44,13 @@ export function createRoadMaterial(roadWidth, trackLength) {
   const normals = new Uint8Array(size * size * 4);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const u = x / size, v = y / size, index = y * size + x;
-      const aggregate = tileNoise(u, v, 128) * 0.55 + tileNoise(u, v, 256) * 0.3 + tileNoise(u, v, 32) * 0.15;
+      const u = x / size,
+        v = y / size,
+        index = y * size + x;
+      const aggregate =
+        tileNoise(u, v, 128) * 0.55 +
+        tileNoise(u, v, 256) * 0.3 +
+        tileNoise(u, v, 32) * 0.15;
       height[index] = aggregate;
       const variation = tileNoise(u, v, 8) - 0.5;
       const shade = 45 + aggregate * 42 + variation * 10;
@@ -53,13 +63,19 @@ export function createRoadMaterial(roadWidth, trackLength) {
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       // Central differences wrap at tile edges, keeping the bump field seamless.
-      const dx = height[y * size + (x + 1) % size] - height[y * size + (x + size - 1) % size];
-      const dy = height[((y + 1) % size) * size + x] - height[((y + size - 1) % size) * size + x];
-      const nx = -dx * 2.4, ny = -dy * 2.4, length = Math.hypot(nx, ny, 1);
+      const dx =
+        height[y * size + ((x + 1) % size)] -
+        height[y * size + ((x + size - 1) % size)];
+      const dy =
+        height[((y + 1) % size) * size + x] -
+        height[((y + size - 1) % size) * size + x];
+      const nx = -dx * 2.4,
+        ny = -dy * 2.4,
+        length = Math.hypot(nx, ny, 1);
       const at = (y * size + x) * 4;
-      normals[at] = Math.round((nx / length * 0.5 + 0.5) * 255);
-      normals[at + 1] = Math.round((ny / length * 0.5 + 0.5) * 255);
-      normals[at + 2] = Math.round((1 / length * 0.5 + 0.5) * 255);
+      normals[at] = Math.round(((nx / length) * 0.5 + 0.5) * 255);
+      normals[at + 1] = Math.round(((ny / length) * 0.5 + 0.5) * 255);
+      normals[at + 2] = Math.round(((1 / length) * 0.5 + 0.5) * 255);
       normals[at + 3] = 255;
     }
   }
@@ -71,7 +87,8 @@ export function createRoadMaterial(roadWidth, trackLength) {
   const roughness = new Uint8Array(size * roughHeight * 4);
   for (let y = 0; y < roughHeight; y++) {
     for (let x = 0; x < size; x++) {
-      const u = x / (size - 1), v = y / roughHeight;
+      const u = x / (size - 1),
+        v = y / roughHeight;
       const polish = Math.exp(-Math.pow((u - 0.5) / 0.13, 2));
       const grain = (tileNoise(u, v, 32) - 0.5) * 0.025;
       const value = Math.round((0.94 - polish * 0.16 + grain) * 255);
@@ -80,9 +97,20 @@ export function createRoadMaterial(roadWidth, trackLength) {
       roughness[at + 3] = 255;
     }
   }
-  const map = texture(albedo, size, size, 'asphalt-albedo', THREE.SRGBColorSpace);
+  const map = texture(
+    albedo,
+    size,
+    size,
+    'asphalt-albedo',
+    THREE.SRGBColorSpace,
+  );
   const normalMap = texture(normals, size, size, 'asphalt-normal');
-  const roughnessMap = texture(roughness, size, roughHeight, 'asphalt-racing-line-roughness');
+  const roughnessMap = texture(
+    roughness,
+    size,
+    roughHeight,
+    'asphalt-racing-line-roughness',
+  );
   const lengthRepeats = Math.max(1, Math.round(trackLength / 2));
   map.repeat.set(roadWidth / 2, lengthRepeats);
   normalMap.repeat.copy(map.repeat);

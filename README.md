@@ -47,20 +47,20 @@ The host browser owns the simulation, lap counts, positions, and rendering. The 
 
 Key files:
 
-| File | Responsibility |
-| --- | --- |
-| `server.js` | Express assets, rooms, roles, and Socket.IO routing |
-| `public/js/host.js` | Host scene, cameras, UI, race lifecycle, and rendering loop |
-| `public/js/physics.js` | Car movement and wall handling |
-| `public/js/nitro.js` | Nitrous tuning, straight-section placement, collection, and respawn |
-| `public/js/nitro-visuals.js` | Glowing bottle and road-ring visuals |
-| `public/js/race.js` | Lap gate progress and rankings |
-| `public/js/track.js` | Track geometry, scenery, and gate locations |
-| `public/js/scenery.js` | Instanced pine forest, crowd billboards, grandstand LOD, and mountain ridges |
-| `public/js/road-material.js` | Asphalt albedo, normal, and racing-line roughness maps |
-| `public/js/carmesh.js` | Car asset loading, cloning, and disposal |
-| `public/js/audio.js` | Engine and effect audio |
-| `public/js/controller.js` | Phone controls and feedback |
+| File                         | Responsibility                                                               |
+| ---------------------------- | ---------------------------------------------------------------------------- |
+| `server.js`                  | Express assets, rooms, roles, and Socket.IO routing                          |
+| `public/js/host.js`          | Host scene, cameras, UI, race lifecycle, and rendering loop                  |
+| `public/js/physics.js`       | Car movement and wall handling                                               |
+| `public/js/nitro.js`         | Nitrous tuning, straight-section placement, collection, and respawn          |
+| `public/js/nitro-visuals.js` | Glowing bottle and road-ring visuals                                         |
+| `public/js/race.js`          | Lap gate progress and rankings                                               |
+| `public/js/track.js`         | Track geometry, scenery, and gate locations                                  |
+| `public/js/scenery.js`       | Instanced pine forest, crowd billboards, grandstand LOD, and mountain ridges |
+| `public/js/road-material.js` | Asphalt albedo, normal, and racing-line roughness maps                       |
+| `public/js/carmesh.js`       | Car asset loading, cloning, and disposal                                     |
+| `public/js/audio.js`         | Engine and effect audio                                                      |
+| `public/js/controller.js`    | Phone controls and feedback                                                  |
 
 The car model and HDR environments are served from `public/assets`. The car falls back to a procedural model if its glTF file fails to load. Postprocessing runs separately for each player using shared viewport-sized buffers, keeping bloom and nitro blur inside that player's view. Actual frame rate depends on the laptop GPU and display resolution; **B** disables postprocessing on slower devices.
 

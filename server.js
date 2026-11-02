@@ -33,17 +33,28 @@ const io = new Server(server, {
 });
 
 // --- Static assets -------------------------------------------------------
-app.use(express.static(path.join(__dirname, 'public'), {
-  setHeaders(res, filePath) {
-    // Reload game code and pages after local fixes; keep large model/sky assets cacheable.
-    if (/\.(html|js|css)$/.test(filePath)) res.setHeader('Cache-Control', 'no-store');
-  },
-}));
+app.use(
+  express.static(path.join(__dirname, 'public'), {
+    setHeaders(res, filePath) {
+      // Reload game code and pages after local fixes; keep large model/sky assets cacheable.
+      if (/\.(html|js|css)$/.test(filePath))
+        res.setHeader('Cache-Control', 'no-store');
+    },
+  }),
+);
 // Serve three.js straight from node_modules so there is no build step and
 // no dependency on an internet connection at play time.
-app.use('/lib', express.static(path.join(__dirname, 'node_modules', 'three', 'build')));
+app.use(
+  '/lib',
+  express.static(path.join(__dirname, 'node_modules', 'three', 'build')),
+);
 // Addon loaders (GLTFLoader, DRACOLoader, RGBELoader) + the Draco decoder.
-app.use('/jsm', express.static(path.join(__dirname, 'node_modules', 'three', 'examples', 'jsm')));
+app.use(
+  '/jsm',
+  express.static(
+    path.join(__dirname, 'node_modules', 'three', 'examples', 'jsm'),
+  ),
+);
 
 // QR code as a PNG. The host page points this at the controller join URL.
 app.get('/qr', async (req, res) => {
@@ -74,9 +85,14 @@ function scoreIface(name, addr) {
   const n = name.toLowerCase();
   if (/wi-?fi|wlan|wireless/.test(n)) s += 100;
   else if (/ethernet|^eth|^en\d|lan/.test(n)) s += 60;
-  if (/virtual|vbox|vmware|hyper-v|vethernet|wsl|docker|default switch|loopback/.test(n)) s -= 300;
+  if (
+    /virtual|vbox|vmware|hyper-v|vethernet|wsl|docker|default switch|loopback/.test(
+      n,
+    )
+  )
+    s -= 300;
   if (addr.startsWith('192.168.56.')) s -= 200; // VirtualBox host-only default
-  if (addr.startsWith('169.254.')) s -= 100;    // link-local / APIPA
+  if (addr.startsWith('169.254.')) s -= 100; // link-local / APIPA
   if (addr.startsWith('192.168.')) s += 20;
   else if (addr.startsWith('10.')) s += 12;
   else if (addr.startsWith('172.')) s += 6;
@@ -89,7 +105,11 @@ function lanCandidates() {
   for (const name of Object.keys(ifaces)) {
     for (const net of ifaces[name] || []) {
       if (net.family !== 'IPv4' || net.internal) continue;
-      out.push({ name, address: net.address, score: scoreIface(name, net.address) });
+      out.push({
+        name,
+        address: net.address,
+        score: scoreIface(name, net.address),
+      });
     }
   }
   out.sort((a, b) => b.score - a.score);
@@ -121,19 +141,30 @@ function roomPlayers(room) {
 
 function hostRoom(socket) {
   const room = rooms.get(socket.data.code);
-  return socket.data.role === 'host' && room?.hostId === socket.id ? room : null;
+  return socket.data.role === 'host' && room?.hostId === socket.id
+    ? room
+    : null;
 }
 
 function controllerRoom(socket) {
   const room = rooms.get(socket.data.code);
-  return socket.data.role === 'ctrl' && room?.players.has(socket.id) ? room : null;
+  return socket.data.role === 'ctrl' && room?.players.has(socket.id)
+    ? room
+    : null;
 }
 
 function validInput(input) {
-  if (!input || typeof input !== 'object' ||
-      typeof input.steer !== 'number' || !Number.isFinite(input.steer) ||
-      typeof input.brake !== 'number' || !Number.isFinite(input.brake) ||
-      (input.throttle !== undefined && (typeof input.throttle !== 'number' || !Number.isFinite(input.throttle)))) return null;
+  if (
+    !input ||
+    typeof input !== 'object' ||
+    typeof input.steer !== 'number' ||
+    !Number.isFinite(input.steer) ||
+    typeof input.brake !== 'number' ||
+    !Number.isFinite(input.brake) ||
+    (input.throttle !== undefined &&
+      (typeof input.throttle !== 'number' || !Number.isFinite(input.throttle)))
+  )
+    return null;
   return {
     steer: Math.max(-1, Math.min(1, input.steer)),
     brake: Math.max(0, Math.min(1, input.brake)),
@@ -147,7 +178,12 @@ io.on('connection', (socket) => {
     if (socket.data.role) return cb?.({ error: 'Already in a game.' });
     const code = makeCode();
     const settings = { autoAccelerate: true };
-    rooms.set(code, { hostId: socket.id, started: false, settings, players: new Map() });
+    rooms.set(code, {
+      hostId: socket.id,
+      started: false,
+      settings,
+      players: new Map(),
+    });
     socket.join(code);
     socket.data.role = 'host';
     socket.data.code = code;
@@ -155,17 +191,32 @@ io.on('connection', (socket) => {
     const ip = lanIp();
     const url = `http://${ip}:${PORT}/controller.html?room=${code}`;
     // Offer every usable address so the user can switch if the default is wrong.
-    const addresses = [ip, ...lanCandidates().map((c) => c.address)]
-      .filter((a, i, arr) => arr.indexOf(a) === i);
-    if (typeof cb === 'function') cb({ code, url, ip, port: PORT, addresses, settings });
+    const addresses = [ip, ...lanCandidates().map((c) => c.address)].filter(
+      (a, i, arr) => arr.indexOf(a) === i,
+    );
+    if (typeof cb === 'function')
+      cb({ code, url, ip, port: PORT, addresses, settings });
   });
 
   socket.on('host:settings', (settings, cb) => {
     const room = hostRoom(socket);
-    if (!room) return cb?.({ ok: false, error: 'Only the host can change the driving mode.' });
-    if (room.started) return cb?.({ ok: false, error: 'Change the driving mode in the lobby.', settings: room.settings });
+    if (!room)
+      return cb?.({
+        ok: false,
+        error: 'Only the host can change the driving mode.',
+      });
+    if (room.started)
+      return cb?.({
+        ok: false,
+        error: 'Change the driving mode in the lobby.',
+        settings: room.settings,
+      });
     if (typeof settings?.autoAccelerate !== 'boolean') {
-      return cb?.({ ok: false, error: 'Invalid driving mode.', settings: room.settings });
+      return cb?.({
+        ok: false,
+        error: 'Invalid driving mode.',
+        settings: room.settings,
+      });
     }
     room.settings = { autoAccelerate: settings.autoAccelerate };
     io.to(socket.data.code).emit('game:settings', room.settings);
@@ -180,20 +231,40 @@ io.on('connection', (socket) => {
 
   // ---- Controller (phone) joins a room ----
   socket.on('ctrl:join', (payload, cb) => {
-    if (socket.data.role === 'host') return cb?.({ ok: false, error: 'Host cannot join as a controller.' });
-    const code = String((payload && payload.code) || '').toUpperCase().trim();
+    if (socket.data.role === 'host')
+      return cb?.({ ok: false, error: 'Host cannot join as a controller.' });
+    const code = String((payload && payload.code) || '')
+      .toUpperCase()
+      .trim();
     const name = (payload && payload.name) || '';
     const room = rooms.get(code);
-    if (!room) return cb && cb({ ok: false, error: 'Game not found. Check the code.' });
+    if (!room)
+      return cb && cb({ ok: false, error: 'Game not found. Check the code.' });
     const existing = room.players.get(socket.id);
     if (existing) {
-      return cb && cb({ ok: true, slot: existing.slot, color: existing.color,
-        name: existing.name, started: room.started, settings: room.settings });
+      return (
+        cb &&
+        cb({
+          ok: true,
+          slot: existing.slot,
+          color: existing.color,
+          name: existing.name,
+          started: room.started,
+          settings: room.settings,
+        })
+      );
     }
     if (socket.data.code && socket.data.code !== code) {
-      return cb && cb({ ok: false, error: 'Already connected to another game. Reload to switch.' });
+      return (
+        cb &&
+        cb({
+          ok: false,
+          error: 'Already connected to another game. Reload to switch.',
+        })
+      );
     }
-    if (room.players.size >= MAX_PLAYERS) return cb && cb({ ok: false, error: 'Game is full (4 players).' });
+    if (room.players.size >= MAX_PLAYERS)
+      return cb && cb({ ok: false, error: 'Game is full (4 players).' });
 
     const used = new Set(roomPlayers(room).map((p) => p.slot));
     let slot = 0;
@@ -213,7 +284,15 @@ io.on('connection', (socket) => {
     socket.data.slot = slot;
 
     io.to(room.hostId).emit('player:join', player);
-    if (cb) cb({ ok: true, slot, color: player.color, name: player.name, started: room.started, settings: room.settings });
+    if (cb)
+      cb({
+        ok: true,
+        slot,
+        color: player.color,
+        name: player.name,
+        started: room.started,
+        settings: room.settings,
+      });
   });
 
   // ---- Controller -> Host: input (high frequency) ----
@@ -221,7 +300,11 @@ io.on('connection', (socket) => {
     const room = controllerRoom(socket);
     const normalized = validInput(input);
     if (!room || !normalized) return;
-    io.to(room.hostId).emit('player:input', { id: socket.id, slot: socket.data.slot, input: normalized });
+    io.to(room.hostId).emit('player:input', {
+      id: socket.id,
+      slot: socket.data.slot,
+      input: normalized,
+    });
   });
 
   // ---- Controller -> Host: ready toggle / name change ----
@@ -230,7 +313,11 @@ io.on('connection', (socket) => {
     if (!room) return;
     const p = room.players.get(socket.id);
     p.ready = !!ready;
-    io.to(room.hostId).emit('player:ready', { id: socket.id, slot: p.slot, ready: p.ready });
+    io.to(room.hostId).emit('player:ready', {
+      id: socket.id,
+      slot: p.slot,
+      ready: p.ready,
+    });
   });
 
   // ---- Host -> Controller: feedback (vibration, status) ----
@@ -264,7 +351,10 @@ io.on('connection', (socket) => {
       rooms.delete(code);
     } else {
       room.players.delete(socket.id);
-      io.to(room.hostId).emit('player:leave', { id: socket.id, slot: socket.data.slot });
+      io.to(room.hostId).emit('player:leave', {
+        id: socket.id,
+        slot: socket.data.slot,
+      });
     }
   });
 });
@@ -275,5 +365,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`  On this laptop, open:   http://localhost:${PORT}`);
   console.log(`  Serving project:       ${__dirname}`);
   console.log(`  Phones join via QR, or: http://${ip}:${PORT}/controller.html`);
-  console.log('\n  (Phones must be on the same Wi-Fi. Allow Node through the firewall if prompted.)\n');
+  console.log(
+    '\n  (Phones must be on the same Wi-Fi. Allow Node through the firewall if prompted.)\n',
+  );
 });
