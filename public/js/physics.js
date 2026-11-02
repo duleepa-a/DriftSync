@@ -20,10 +20,16 @@ const ahead = new THREE.Vector3();
 const skid = new THREE.Vector3();
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-export function updateCar(p, dt, track, { dropSkid, onGate, autoAccelerate = true }) {
+export function updateCar(
+  p,
+  dt,
+  track,
+  { dropSkid, onGate, autoAccelerate = true },
+) {
   if (p.finished) return;
   const inp = p.input;
-  p.steerSmooth += (clamp(inp.steer, -1, 1) - p.steerSmooth) * Math.min(1, dt * 12);
+  p.steerSmooth +=
+    (clamp(inp.steer, -1, 1) - p.steerSmooth) * Math.min(1, dt * 12);
   const steer = p.steerSmooth;
   const brake = clamp(inp.brake || 0, 0, 1);
   const throttle = autoAccelerate ? 1 : clamp(inp.throttle || 0, 0, 1);
@@ -41,7 +47,12 @@ export function updateCar(p, dt, track, { dropSkid, onGate, autoAccelerate = tru
     p.speed = Math.sign(p.speed) * Math.max(0, Math.abs(p.speed) - decel);
   } else if (p.speed <= speedLimit) {
     const drag = PHYS.dragK * p.speed * Math.abs(p.speed);
-    p.speed = Math.min(speedLimit, p.speed + ((PHYS.accel + (boosting ? NITRO.extraAccel : 0)) * throttle - drag) * dt);
+    p.speed = Math.min(
+      speedLimit,
+      p.speed +
+        ((PHYS.accel + (boosting ? NITRO.extraAccel : 0)) * throttle - drag) *
+          dt,
+    );
   } else {
     // Let boost speed bleed off smoothly instead of snapping to the normal cap.
     p.speed = Math.max(speedLimit, p.speed - NITRO.coastDecel * dt);
@@ -60,10 +71,13 @@ export function updateCar(p, dt, track, { dropSkid, onGate, autoAccelerate = tru
   const understeer = 1 - clamp((sp - 30) / 90, 0, 0.4);
   const lockAuthority = brake > 0.7 ? 0.6 : 1;
   const dir = p.speed >= 0 ? 1 : -1;
-  p.heading += steer * PHYS.turnRate * rollingGrip * understeer * lockAuthority * dir * dt;
+  p.heading +=
+    steer * PHYS.turnRate * rollingGrip * understeer * lockAuthority * dir * dt;
 
-  const fx = Math.sin(p.heading), fz = Math.cos(p.heading);
-  const previousX = p.pos.x, previousZ = p.pos.z;
+  const fx = Math.sin(p.heading),
+    fz = Math.cos(p.heading);
+  const previousX = p.pos.x,
+    previousZ = p.pos.z;
   p.pos.x += fx * p.speed * dt;
   p.pos.z += fz * p.speed * dt;
 
@@ -71,8 +85,17 @@ export function updateCar(p, dt, track, { dropSkid, onGate, autoAccelerate = tru
   p.sampleIndex = info.index;
   const maxOff = track.halfWidth - 1.4;
   let hitWall = false;
-  if (info.offset > maxOff) { const c = info.offset - maxOff; p.pos.x -= info.nx * c; p.pos.z -= info.nz * c; hitWall = true; }
-  else if (info.offset < -maxOff) { const c = info.offset + maxOff; p.pos.x -= info.nx * c; p.pos.z -= info.nz * c; hitWall = true; }
+  if (info.offset > maxOff) {
+    const c = info.offset - maxOff;
+    p.pos.x -= info.nx * c;
+    p.pos.z -= info.nz * c;
+    hitWall = true;
+  } else if (info.offset < -maxOff) {
+    const c = info.offset + maxOff;
+    p.pos.x -= info.nx * c;
+    p.pos.z -= info.nz * c;
+    hitWall = true;
+  }
   if (hitWall && !p.offTrack) p.speed *= PHYS.wallScrub;
   p.offTrack = hitWall;
 
@@ -85,12 +108,19 @@ export function updateCar(p, dt, track, { dropSkid, onGate, autoAccelerate = tru
   const groundY = info.groundY;
   p.surfaceY = groundY;
   p.groundY += (groundY - p.groundY) * Math.min(1, dt * 9);
-  const aheadInfo = track.nearestInfo(ahead.set(p.pos.x + fx * 5, 0, p.pos.z + fz * 5), p.sampleIndex);
+  const aheadInfo = track.nearestInfo(
+    ahead.set(p.pos.x + fx * 5, 0, p.pos.z + fz * 5),
+    p.sampleIndex,
+  );
   const slopePitch = -Math.atan2(aheadInfo.groundY - groundY, 5);
   p.shadowSlopePitch = slopePitch;
   const accelEst = (p.speed - p.prevSpeed) / Math.max(dt, 1e-3);
   p.prevSpeed = p.speed;
-  const pitch = clamp(slopePitch + clamp(-accelEst * 0.004, -0.05, 0.05), -0.3, 0.3);
+  const pitch = clamp(
+    slopePitch + clamp(-accelEst * 0.004, -0.05, 0.05),
+    -0.3,
+    0.3,
+  );
   const bodyRoll = clamp(steer * sp * 0.0016, -0.06, 0.06);
   p.pitch = pitch;
   p.roll = -bodyRoll;
@@ -105,7 +135,10 @@ export function updateCar(p, dt, track, { dropSkid, onGate, autoAccelerate = tru
     if (i < 2) wheels[i].rotation.y = steer * 0.4;
   }
   if (p.skidding && wheels.length >= 4) {
-    for (const wi of [2, 3]) { wheels[wi].getWorldPosition(skid); dropSkid(skid.x, skid.z, p.heading, p.groundY); }
+    for (const wi of [2, 3]) {
+      wheels[wi].getWorldPosition(skid);
+      dropSkid(skid.x, skid.z, p.heading, p.groundY);
+    }
   }
   onGate(p, previousX, previousZ);
 }

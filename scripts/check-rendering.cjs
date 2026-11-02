@@ -6,109 +6,223 @@ const { spawn } = require('node:child_process');
 const express = require('express');
 
 const root = path.resolve(__dirname, '..');
-const chrome = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
+const chrome =
+  process.env.CHROME_PATH ||
+  'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const scale = process.argv.includes('--dpr=2') ? 2 : 1;
 const profileCar = process.argv.includes('--profile-car');
 const profileForest = process.argv.includes('--profile-forest');
 const checkController = process.argv.includes('--controller');
 const app = express();
-let browser, timeout, received = false, debugOrigin;
+let browser,
+  timeout,
+  received = false,
+  debugOrigin;
 app.post('/capture-ui/:name', async (req, res) => {
-  if (!['lobby', 'finish-waiting', 'race-results', 'controller-auto', 'controller-manual', 'controller-portrait'].includes(req.params.name)) return res.sendStatus(400);
+  if (
+    ![
+      'lobby',
+      'finish-waiting',
+      'race-results',
+      'controller-auto',
+      'controller-manual',
+      'controller-portrait',
+    ].includes(req.params.name)
+  )
+    return res.sendStatus(400);
   try {
     const tabs = await (await fetch(debugOrigin + '/json/list')).json();
-    const tab = tabs.find(tab => tab.type === 'page');
+    const tab = tabs.find((tab) => tab.type === 'page');
     const data = await new Promise((resolve, reject) => {
       const ws = new WebSocket(tab.webSocketDebuggerUrl);
-      const timer = setTimeout(() => { ws.close(); reject(new Error('UI capture timed out')); }, 15000);
-      ws.addEventListener('open', () => ws.send(JSON.stringify({ id: 1, method: 'Page.captureScreenshot', params: { format: 'png' } })));
-      ws.addEventListener('message', event => {
+      const timer = setTimeout(() => {
+        ws.close();
+        reject(new Error('UI capture timed out'));
+      }, 15000);
+      ws.addEventListener('open', () =>
+        ws.send(
+          JSON.stringify({
+            id: 1,
+            method: 'Page.captureScreenshot',
+            params: { format: 'png' },
+          }),
+        ),
+      );
+      ws.addEventListener('message', (event) => {
         const reply = JSON.parse(event.data);
         if (reply.id !== 1) return;
-        clearTimeout(timer); ws.close();
+        clearTimeout(timer);
+        ws.close();
         if (reply.error) reject(new Error(reply.error.message));
         else resolve(reply.result.data);
       });
-      ws.addEventListener('error', () => { clearTimeout(timer); reject(new Error('UI capture connection failed')); });
+      ws.addEventListener('error', () => {
+        clearTimeout(timer);
+        reject(new Error('UI capture connection failed'));
+      });
     });
-    const screenshotPath = path.join(os.tmpdir(), 'driftsync-' + req.params.name + '-dpr' + scale + '.png');
+    const screenshotPath = path.join(
+      os.tmpdir(),
+      'driftsync-' + req.params.name + '-dpr' + scale + '.png',
+    );
     fs.writeFileSync(screenshotPath, Buffer.from(data, 'base64'));
     res.json({ screenshotPath });
-  } catch (error) { res.status(500).json({ error: error.message }); }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 // High-DPI PNGs contain much more asphalt/forest detail than the 1x captures.
 app.post('/render-result', express.json({ limit: '32mb' }), (req, res) => {
   received = true;
   const report = req.body;
   if (report.screenshot) {
-    const screenshotPath = path.join(os.tmpdir(), 'driftsync-two-player-dpr' + scale + '.png');
-    fs.writeFileSync(screenshotPath, Buffer.from(report.screenshot.split(',')[1], 'base64'));
+    const screenshotPath = path.join(
+      os.tmpdir(),
+      'driftsync-two-player-dpr' + scale + '.png',
+    );
+    fs.writeFileSync(
+      screenshotPath,
+      Buffer.from(report.screenshot.split(',')[1], 'base64'),
+    );
     delete report.screenshot;
     report.screenshotPath = screenshotPath;
   }
-  for (const key of ['nitroScreenshot', 'boostScreenshot', 'brakeReverseScreenshot', 'sceneryScreenshot', 'smokeScreenshot', 'exhaustScreenshot', 'shadowOffScreenshot']) {
+  for (const key of [
+    'nitroScreenshot',
+    'boostScreenshot',
+    'brakeReverseScreenshot',
+    'sceneryScreenshot',
+    'smokeScreenshot',
+    'exhaustScreenshot',
+    'shadowOffScreenshot',
+  ]) {
     if (!report[key]) continue;
-    const screenshotPath = path.join(os.tmpdir(), 'driftsync-' + key + '-dpr' + scale + '.png');
-    fs.writeFileSync(screenshotPath, Buffer.from(report[key].split(',')[1], 'base64'));
+    const screenshotPath = path.join(
+      os.tmpdir(),
+      'driftsync-' + key + '-dpr' + scale + '.png',
+    );
+    fs.writeFileSync(
+      screenshotPath,
+      Buffer.from(report[key].split(',')[1], 'base64'),
+    );
     delete report[key];
     report[key + 'Path'] = screenshotPath;
   }
   console.log(JSON.stringify(report, null, 2));
-  if (report.error || report.cases?.some(test => test.glError || test.views.some(view => view.bright < 0.2 || view.opaque < 0.95))) process.exitCode = 1;
+  if (
+    report.error ||
+    report.cases?.some(
+      (test) =>
+        test.glError ||
+        test.views.some((view) => view.bright < 0.2 || view.opaque < 0.95),
+    )
+  )
+    process.exitCode = 1;
   res.sendStatus(200);
   browser.kill();
 });
 app.get('/', (_req, res) => {
   if (checkController) {
-    const html = fs.readFileSync(path.join(root, 'public/controller.html'), 'utf8')
-      .replace('<script src="/socket.io/socket.io.js"></script>', `<script>
+    const html = fs
+      .readFileSync(path.join(root, 'public/controller.html'), 'utf8')
+      .replace(
+        '<script src="/socket.io/socket.io.js"></script>',
+        `<script>
         window.io = () => ({ connected: true, on() {}, emit(name, data, cb) {
           if (name === 'ctrl:join') cb({ ok: true, slot: 0, color: '#55c5fa', settings: { autoAccelerate: true } });
         } });
-      </script>`)
+      </script>`,
+      )
       .replace('src="js/controller.js"', 'src="/controller-check.js"');
     return res.type('html').send(html);
   }
-  const html = fs.readFileSync(path.join(root, 'public/index.html'), 'utf8')
-    .replace('<script src="/socket.io/socket.io.js"></script>', '<script>window.io = () => ({ on() {}, emit() {} });</script>')
-    .replace(/src="js\/host\.js[^"]*"/, 'src="/' + (profileCar ? 'profile-car.mjs' : profileForest ? 'profile-forest.mjs' : 'render-check.mjs') + '"');
+  const html = fs
+    .readFileSync(path.join(root, 'public/index.html'), 'utf8')
+    .replace(
+      '<script src="/socket.io/socket.io.js"></script>',
+      '<script>window.io = () => ({ on() {}, emit() {} });</script>',
+    )
+    .replace(
+      /src="js\/host\.js[^"]*"/,
+      'src="/' +
+        (profileCar
+          ? 'profile-car.mjs'
+          : profileForest
+            ? 'profile-forest.mjs'
+            : 'render-check.mjs') +
+        '"',
+    );
   res.type('html').send(html);
 });
-app.get('/controller-check.js', (_req, res) => res.type('js').send(
-  fs.readFileSync(path.join(root, 'public/js/controller.js'), 'utf8') + '\n' +
-  fs.readFileSync(path.join(root, 'scripts/check-controller.js'), 'utf8')
-));
+app.get('/controller-check.js', (_req, res) =>
+  res
+    .type('js')
+    .send(
+      fs.readFileSync(path.join(root, 'public/js/controller.js'), 'utf8') +
+        '\n' +
+        fs.readFileSync(path.join(root, 'scripts/check-controller.js'), 'utf8'),
+    ),
+);
 app.post('/controller-viewport/:orientation', async (req, res) => {
   try {
     const portrait = req.params.orientation === 'portrait';
     const tabs = await (await fetch(debugOrigin + '/json/list')).json();
-    const tab = tabs.find(tab => tab.type === 'page');
+    const tab = tabs.find((tab) => tab.type === 'page');
     await new Promise((resolve, reject) => {
       const ws = new WebSocket(tab.webSocketDebuggerUrl);
-      const timer = setTimeout(() => { ws.close(); reject(new Error('Viewport timed out')); }, 10000);
-      ws.addEventListener('open', () => ws.send(JSON.stringify({ id: 1, method: 'Emulation.setDeviceMetricsOverride',
-        params: { width: portrait ? 375 : 812, height: portrait ? 667 : 375, deviceScaleFactor: 1, mobile: true } })));
-      ws.addEventListener('message', event => {
+      const timer = setTimeout(() => {
+        ws.close();
+        reject(new Error('Viewport timed out'));
+      }, 10000);
+      ws.addEventListener('open', () =>
+        ws.send(
+          JSON.stringify({
+            id: 1,
+            method: 'Emulation.setDeviceMetricsOverride',
+            params: {
+              width: portrait ? 375 : 812,
+              height: portrait ? 667 : 375,
+              deviceScaleFactor: 1,
+              mobile: true,
+            },
+          }),
+        ),
+      );
+      ws.addEventListener('message', (event) => {
         const reply = JSON.parse(event.data);
         if (reply.id !== 1) return;
-        clearTimeout(timer); ws.close();
-        if (reply.error) reject(new Error(reply.error.message)); else resolve();
+        clearTimeout(timer);
+        ws.close();
+        if (reply.error) reject(new Error(reply.error.message));
+        else resolve();
       });
-      ws.addEventListener('error', () => { clearTimeout(timer); reject(new Error('Viewport connection failed')); });
+      ws.addEventListener('error', () => {
+        clearTimeout(timer);
+        reject(new Error('Viewport connection failed'));
+      });
     });
     res.sendStatus(200);
-  } catch (error) { res.status(500).json({ error: error.message }); }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 app.get('/js/host.js', (_req, res) => {
   // Stop only the scheduled loop, so each test can inspect a completed frame.
-  const source = fs.readFileSync(path.join(root, 'public/js/host.js'), 'utf8')
-    .replaceAll('requestAnimationFrame(loop);', '')
-    + '\nexport { G, scene, renderer, composer, renderPass, bloomPass, colorGradePass, addPlayer, removePlayer, backToLobby, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera, emitCarSmoke, updateSmoke, smokePool, skidMesh };';
+  const source =
+    fs
+      .readFileSync(path.join(root, 'public/js/host.js'), 'utf8')
+      .replaceAll('requestAnimationFrame(loop);', '') +
+    '\nexport { G, scene, renderer, composer, renderPass, bloomPass, colorGradePass, addPlayer, removePlayer, backToLobby, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera, emitCarSmoke, updateSmoke, smokePool, skidMesh };';
   res.type('js').send(source);
 });
-app.get('/profile-car.mjs', (_req, res) => res.sendFile(path.join(__dirname, 'profile-car.mjs')));
-app.get('/profile-forest.mjs', (_req, res) => res.sendFile(path.join(__dirname, 'profile-forest.mjs')));
-app.get('/render-check.mjs', (_req, res) => res.type('js').send(`
+app.get('/profile-car.mjs', (_req, res) =>
+  res.sendFile(path.join(__dirname, 'profile-car.mjs')),
+);
+app.get('/profile-forest.mjs', (_req, res) =>
+  res.sendFile(path.join(__dirname, 'profile-forest.mjs')),
+);
+app.get('/render-check.mjs', (_req, res) =>
+  res.type('js').send(`
 import { G, scene, renderer, composer, renderPass, bloomPass, colorGradePass, addPlayer, removePlayer, backToLobby, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera, emitCarSmoke, updateSmoke, smokePool, skidMesh } from '/js/host.js';
 import { resetMotion, renderCar } from '/js/motion.js';
 import { updateCarEffects } from '/js/car-effects.js';
@@ -489,32 +603,53 @@ try {
   report.textContent = JSON.stringify({ devicePixelRatio, lobbyScreenshotPath, motion, nitro, bloom, carShadow, scenery, finishing, cases, screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, smokeScreenshot, exhaustScreenshot, shadowOffScreenshot });
 } catch (error) { report.textContent = JSON.stringify({ error: error.stack }); }
 await fetch('/render-result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: report.textContent });
-`));
+`),
+);
 app.use(express.static(path.join(root, 'public')));
 app.use('/lib', express.static(path.join(root, 'node_modules/three/build')));
-app.use('/jsm', express.static(path.join(root, 'node_modules/three/examples/jsm')));
+app.use(
+  '/jsm',
+  express.static(path.join(root, 'node_modules/three/examples/jsm')),
+);
 
 const server = app.listen(0, '127.0.0.1', () => {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'driftsync-render-'));
-  browser = spawn(chrome, [
-    '--headless=new', '--no-first-run', '--no-default-browser-check',
-    '--remote-debugging-port=0',
-    '--disable-background-networking', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
-    '--window-size=960,640', '--force-device-scale-factor=' + scale,
-    '--user-data-dir=' + profile,
-    'http://127.0.0.1:' + server.address().port,
-  ], { windowsHide: true });
+  browser = spawn(
+    chrome,
+    [
+      '--headless=new',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--remote-debugging-port=0',
+      '--disable-background-networking',
+      '--use-angle=swiftshader',
+      '--enable-unsafe-swiftshader',
+      '--window-size=960,640',
+      '--force-device-scale-factor=' + scale,
+      '--user-data-dir=' + profile,
+      'http://127.0.0.1:' + server.address().port,
+    ],
+    { windowsHide: true },
+  );
   let errors = '';
-  browser.stderr.on('data', chunk => {
+  browser.stderr.on('data', (chunk) => {
     errors += chunk;
     const match = errors.match(/DevTools listening on (ws:\/\/[^\s]+)/);
     if (match) debugOrigin = 'http://127.0.0.1:' + new URL(match[1]).port;
   });
   timeout = setTimeout(() => browser.kill(), 180000);
-  browser.on('error', error => { console.error(error.message); process.exitCode = 1; server.close(); clearTimeout(timeout); });
+  browser.on('error', (error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+    server.close();
+    clearTimeout(timeout);
+  });
   browser.on('close', () => {
     clearTimeout(timeout);
     server.close();
-    if (!received) { console.error('No render report. ' + errors.slice(-2000)); process.exitCode = 1; }
+    if (!received) {
+      console.error('No render report. ' + errors.slice(-2000));
+      process.exitCode = 1;
+    }
   });
 });

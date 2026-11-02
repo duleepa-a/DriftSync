@@ -13,9 +13,20 @@ import { updateCarEffects } from './car-effects.js';
 import * as audio from './audio.js';
 import { PHYS, updateCar } from './physics.js';
 import { resetMotion, savePreviousPose, renderCar } from './motion.js';
-import { NITRO, createNitroPickups, resetNitroPickups, updateNitroPickups } from './nitro.js';
+import {
+  NITRO,
+  createNitroPickups,
+  resetNitroPickups,
+  updateNitroPickups,
+} from './nitro.js';
 import { createNitroVisuals } from './nitro-visuals.js';
-import { TOTAL_LAPS, advanceGates, recordFinish, allPlayersFinished, rankings as rankPlayers } from './race.js';
+import {
+  TOTAL_LAPS,
+  advanceGates,
+  recordFinish,
+  allPlayersFinished,
+  rankings as rankPlayers,
+} from './race.js';
 
 /* global io */
 
@@ -71,11 +82,16 @@ const drawingSize = renderer.getDrawingBufferSize(new THREE.Vector2());
 
 const ColorGradeShader = {
   uniforms: {
-    tDiffuse: { value: null }, uSat: { value: 1.06 }, uCon: { value: 1.025 }, uVig: { value: 0.22 },
-    uBoost: { value: new THREE.Vector4() }, uView: { value: 0 },
+    tDiffuse: { value: null },
+    uSat: { value: 1.06 },
+    uCon: { value: 1.025 },
+    uVig: { value: 0.22 },
+    uBoost: { value: new THREE.Vector4() },
+    uView: { value: 0 },
     uTexel: { value: new THREE.Vector2(1 / drawingSize.x, 1 / drawingSize.y) },
   },
-  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+  vertexShader:
+    'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
   fragmentShader: `
     uniform sampler2D tDiffuse; uniform float uSat, uCon, uVig; varying vec2 vUv;
     uniform vec4 uBoost; uniform float uView; uniform vec2 uTexel;
@@ -108,22 +124,25 @@ const renderPass = new RenderPass(scene, null); // Camera assigned per viewport.
 composer.addPass(renderPass);
 const bloomPass = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0.38,  // soft glow around emissive lamps and bright reflections
-  0.45,  // compact halo, keeping the road/car silhouettes crisp
-  1.25   // linear HDR threshold: ordinary white paint does not bloom
+  0.38, // soft glow around emissive lamps and bright reflections
+  0.45, // compact halo, keeping the road/car silhouettes crisp
+  1.25, // linear HDR threshold: ordinary white paint does not bloom
 );
 composer.addPass(bloomPass);
 const colorGradePass = new ShaderPass(ColorGradeShader);
 composer.addPass(colorGradePass);
 composer.addPass(new OutputPass());
-let postWidth = window.innerWidth, postHeight = window.innerHeight;
+let postWidth = window.innerWidth,
+  postHeight = window.innerHeight;
 function setPostSize(width, height) {
   const ratio = renderer.getPixelRatio();
   // Equal-sized buffers for both halves, even on odd-pixel-sized displays.
-  const w = Math.ceil(width * ratio) / ratio, h = Math.ceil(height * ratio) / ratio;
+  const w = Math.ceil(width * ratio) / ratio,
+    h = Math.ceil(height * ratio) / ratio;
   if (postWidth !== w || postHeight !== h) {
     composer.setSize(w, h);
-    postWidth = w; postHeight = h;
+    postWidth = w;
+    postHeight = h;
   }
   colorGradePass.uniforms.uTexel.value.set(1 / (w * ratio), 1 / (h * ratio));
 }
@@ -136,21 +155,29 @@ let environmentTarget = pmrem.fromEquirectangular(skyEquirect);
 scene.environment = environmentTarget.texture;
 scene.background = skyEquirect;
 
-new RGBELoader().load('/assets/venice_sunset_1k.hdr', (hdr) => {
-  hdr.mapping = THREE.EquirectangularReflectionMapping;
-  const nextEnvironment = pmrem.fromEquirectangular(hdr);
-  nextEnvironment.texture.name = 'sunset-environment';
-  scene.environment = nextEnvironment.texture;
-  environmentTarget.dispose();
-  environmentTarget = nextEnvironment;
-  hdr.dispose();
-  pmrem.dispose();
-  G.environmentReady = true;
-}, undefined, (error) => {
-  console.warn('Sunset HDRI failed to load; using the procedural sunset.', error);
-  pmrem.dispose();
-  G.environmentReady = true;
-});
+new RGBELoader().load(
+  '/assets/venice_sunset_1k.hdr',
+  (hdr) => {
+    hdr.mapping = THREE.EquirectangularReflectionMapping;
+    const nextEnvironment = pmrem.fromEquirectangular(hdr);
+    nextEnvironment.texture.name = 'sunset-environment';
+    scene.environment = nextEnvironment.texture;
+    environmentTarget.dispose();
+    environmentTarget = nextEnvironment;
+    hdr.dispose();
+    pmrem.dispose();
+    G.environmentReady = true;
+  },
+  undefined,
+  (error) => {
+    console.warn(
+      'Sunset HDRI failed to load; using the procedural sunset.',
+      error,
+    );
+    pmrem.dispose();
+    G.environmentReady = true;
+  },
+);
 
 G.track = buildTrack(scene);
 const trackScenery = scene.getObjectByName('track-scenery');
@@ -161,19 +188,29 @@ let nitroVisualTime = 0;
 nitroVisuals.update(0);
 
 // Preload the real car model; until it's ready, the Start button waits.
-loadCarAssets().then(() => { G.assetsReady = true; updateLobby(); });
+loadCarAssets().then(() => {
+  G.assetsReady = true;
+  updateLobby();
+});
 
 // Overview camera for the lobby / attract screen.
-const overview = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 2000);
+const overview = new THREE.PerspectiveCamera(
+  55,
+  window.innerWidth / window.innerHeight,
+  1,
+  2000,
+);
 overview.layers.enable(1);
 
 window.addEventListener('resize', () => {
-  const w = window.innerWidth, h = window.innerHeight;
+  const w = window.innerWidth,
+    h = window.innerHeight;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(w, h);
   composer.setPixelRatio(renderer.getPixelRatio());
   composer.setSize(w, h);
-  postWidth = w; postHeight = h;
+  postWidth = w;
+  postHeight = h;
   layoutHud();
 });
 
@@ -225,7 +262,10 @@ function addPlayer(p) {
 
 function removePlayer(id) {
   const p = G.players.get(id);
-  if (p && p.mesh) { scene.remove(p.mesh); disposeCarMesh(p.mesh); }
+  if (p && p.mesh) {
+    scene.remove(p.mesh);
+    disposeCarMesh(p.mesh);
+  }
   audio.stopVoice(id);
   G.players.delete(id);
   if (G.state === 'countdown' || G.state === 'racing') layoutHud();
@@ -281,9 +321,14 @@ function spawnPlayer(p) {
   p.sampleIndex = ni.index;
   p.groundY = ni.groundY;
   p.surfaceY = ni.groundY;
-  const shadowAhead = G.track.nearestInfo(new THREE.Vector3(
-    p.pos.x + Math.sin(p.heading) * 5, 0, p.pos.z + Math.cos(p.heading) * 5
-  ), ni.index);
+  const shadowAhead = G.track.nearestInfo(
+    new THREE.Vector3(
+      p.pos.x + Math.sin(p.heading) * 5,
+      0,
+      p.pos.z + Math.cos(p.heading) * 5,
+    ),
+    ni.index,
+  );
   p.shadowSlopePitch = -Math.atan2(shadowAhead.groundY - ni.groundY, 5);
   p.mesh.position.set(p.pos.x, p.groundY, p.pos.z);
   p.mesh.rotation.set(0, p.heading, 0);
@@ -320,20 +365,29 @@ function finishPlayer(p, elapsed) {
   p.input = { steer: 0, throttle: 0, brake: 0 };
   resetMotion(p);
   audio.stopVoice(p.id);
-  feedback(p, { place: p.finishRank, speed: 0, lap: TOTAL_LAPS, totalLaps: TOTAL_LAPS, vibrate: 100 });
+  feedback(p, {
+    place: p.finishRank,
+    speed: 0,
+    lap: TOTAL_LAPS,
+    totalLaps: TOTAL_LAPS,
+    vibrate: 100,
+  });
   checkRaceComplete();
 }
 
 function checkRaceComplete() {
   if (G.state !== 'racing') return;
   const ps = activePlayers();
-  if (allPlayersFinished(ps) || (ps.length === 0 && G.finishOrder.length > 0)) endRace();
+  if (allPlayersFinished(ps) || (ps.length === 0 && G.finishOrder.length > 0))
+    endRace();
   else if (ps.length === 0) backToLobby();
 }
 
 function placesFor(ranks) {
   let nextPlace = G.finishOrder.length + 1;
-  return new Map(ranks.map(p => [p.id, p.finished ? p.finishRank : nextPlace++]));
+  return new Map(
+    ranks.map((p) => [p.id, p.finished ? p.finishRank : nextPlace++]),
+  );
 }
 
 function ordinal(place) {
@@ -343,19 +397,24 @@ function ordinal(place) {
 }
 
 function handleCollisions() {
-  const ps = activePlayers().filter(p => !p.finished);
+  const ps = activePlayers().filter((p) => !p.finished);
   for (let i = 0; i < ps.length; i++) {
     for (let j = i + 1; j < ps.length; j++) {
-      const a = ps[i], b = ps[j];
+      const a = ps[i],
+        b = ps[j];
       const dx = b.pos.x - a.pos.x;
       const dz = b.pos.z - a.pos.z;
       const d = Math.hypot(dx, dz);
       if (d > 0.001 && d < COLLIDE_DIST) {
         const overlap = (COLLIDE_DIST - d) / 2;
-        const nx = dx / d, nz = dz / d;
-        a.pos.x -= nx * overlap; a.pos.z -= nz * overlap;
-        b.pos.x += nx * overlap; b.pos.z += nz * overlap;
-        a.speed *= 0.7; b.speed *= 0.7;
+        const nx = dx / d,
+          nz = dz / d;
+        a.pos.x -= nx * overlap;
+        a.pos.z -= nz * overlap;
+        b.pos.x += nx * overlap;
+        b.pos.z += nz * overlap;
+        a.speed *= 0.7;
+        b.speed *= 0.7;
         audio.collision();
         feedback(a, { vibrate: 40 });
         feedback(b, { vibrate: 40 });
@@ -372,10 +431,15 @@ function rankings() {
 }
 
 function placeCamera(p, snap = false, dt = 1 / 60) {
-  const pos = p.mesh.position, heading = p.mesh.rotation.y;
-  const back = 5.6 + (p.nitroVisual || 0) * 0.6, height = pos.y + 2.5, look = 11;
-  const fx = Math.sin(heading), fz = Math.cos(heading);
-  const tx = pos.x - fx * back, tz = pos.z - fz * back;
+  const pos = p.mesh.position,
+    heading = p.mesh.rotation.y;
+  const back = 5.6 + (p.nitroVisual || 0) * 0.6,
+    height = pos.y + 2.5,
+    look = 11;
+  const fx = Math.sin(heading),
+    fz = Math.cos(heading);
+  const tx = pos.x - fx * back,
+    tz = pos.z - fz * back;
 
   if (snap) {
     p.camPos.set(tx, height, tz);
@@ -387,7 +451,8 @@ function placeCamera(p, snap = false, dt = 1 / 60) {
     p.camPos.y += (height - p.camPos.y) * (1 - Math.pow(1 - 0.25, dt * 60));
   }
   // Keep distance stable for the current nitro blend, independent of speed lag.
-  let dx = p.camPos.x - pos.x, dz = p.camPos.z - pos.z;
+  let dx = p.camPos.x - pos.x,
+    dz = p.camPos.z - pos.z;
   const h = Math.hypot(dx, dz) || 1;
   p.camPos.x = pos.x + (dx / h) * back;
   p.camPos.z = pos.z + (dz / h) * back;
@@ -396,19 +461,31 @@ function placeCamera(p, snap = false, dt = 1 / 60) {
   p.camera.position.copy(p.camPos);
 
   // Gentle dynamic FOV for a sense of speed (small, so the car stays big).
-  const targetFov = 60 + Math.min(sp / PHYS.maxSpeed, 1) * 5 + (p.nitroVisual || 0) * 5;
-  p.camera.fov += (targetFov - p.camera.fov) * (snap ? 1 : 1 - Math.pow(1 - 0.08, dt * 60));
+  const targetFov =
+    60 + Math.min(sp / PHYS.maxSpeed, 1) * 5 + (p.nitroVisual || 0) * 5;
+  p.camera.fov +=
+    (targetFov - p.camera.fov) * (snap ? 1 : 1 - Math.pow(1 - 0.08, dt * 60));
 
   // Look slightly into the corner (at the car's elevation).
-  const rx = Math.cos(heading), rz = -Math.sin(heading);
+  const rx = Math.cos(heading),
+    rz = -Math.sin(heading);
   const lead = p.renderSteer * 4;
-  p.camera.lookAt(pos.x + fx * look + rx * lead, pos.y + 1.4, pos.z + fz * look + rz * lead);
+  p.camera.lookAt(
+    pos.x + fx * look + rx * lead,
+    pos.y + 1.4,
+    pos.z + fz * look + rz * lead,
+  );
 }
 
 function layoutRects(n) {
-  const W = window.innerWidth, H = window.innerHeight;
+  const W = window.innerWidth,
+    H = window.innerHeight;
   if (n <= 1) return [{ x: 0, y: 0, w: W, h: H }];
-  if (n === 2) return [{ x: 0, y: 0, w: W, h: H / 2 }, { x: 0, y: H / 2, w: W, h: H / 2 }];
+  if (n === 2)
+    return [
+      { x: 0, y: 0, w: W, h: H / 2 },
+      { x: 0, y: H / 2, w: W, h: H / 2 },
+    ];
   return [
     { x: 0, y: 0, w: W / 2, h: H / 2 },
     { x: W / 2, y: 0, w: W / 2, h: H / 2 },
@@ -427,12 +504,24 @@ function clearFrame() {
 function renderView(camera, rect, index) {
   const ratio = renderer.getPixelRatio();
   const y = window.innerHeight - rect.y - rect.h;
-  const x0 = Math.round(rect.x * ratio), x1 = Math.round((rect.x + rect.w) * ratio);
-  const y0 = Math.round(y * ratio), y1 = Math.round((y + rect.h) * ratio);
+  const x0 = Math.round(rect.x * ratio),
+    x1 = Math.round((rect.x + rect.w) * ratio);
+  const y0 = Math.round(y * ratio),
+    y1 = Math.round((y + rect.h) * ratio);
   // These are the CANVAS viewport/scissor. Composer targets have their own
   // full-buffer viewport, restored automatically after shadow/bloom passes.
-  renderer.setViewport(x0 / ratio, y0 / ratio, (x1 - x0) / ratio, (y1 - y0) / ratio);
-  renderer.setScissor(x0 / ratio, y0 / ratio, (x1 - x0) / ratio, (y1 - y0) / ratio);
+  renderer.setViewport(
+    x0 / ratio,
+    y0 / ratio,
+    (x1 - x0) / ratio,
+    (y1 - y0) / ratio,
+  );
+  renderer.setScissor(
+    x0 / ratio,
+    y0 / ratio,
+    (x1 - x0) / ratio,
+    (y1 - y0) / ratio,
+  );
   renderer.setScissorTest(true);
   camera.aspect = rect.w / rect.h;
   camera.updateProjectionMatrix();
@@ -448,11 +537,15 @@ function renderView(camera, rect, index) {
 
 function renderSplit() {
   const ps = activePlayers();
-  colorGradePass.uniforms.uBoost.value.set(...[0, 1, 2, 3].map(i => ps[i]?.nitroVisual || 0));
+  colorGradePass.uniforms.uBoost.value.set(
+    ...[0, 1, 2, 3].map((i) => ps[i]?.nitroVisual || 0),
+  );
   const rects = layoutRects(ps.length);
   if (POST && rects.length) setPostSize(rects[0].w, rects[0].h);
   clearFrame();
-  ps.forEach((p, i) => { if (rects[i]) renderView(p.camera, rects[i], i); });
+  ps.forEach((p, i) => {
+    if (rects[i]) renderView(p.camera, rects[i], i);
+  });
   renderer.setScissorTest(false);
   updateHud(ps, rects, rankings());
 }
@@ -460,9 +553,11 @@ function renderSplit() {
 function renderOverview(t) {
   G.track.sunHelper.update();
   colorGradePass.uniforms.uBoost.value.set(0, 0, 0, 0);
-  const W = window.innerWidth, H = window.innerHeight;
+  const W = window.innerWidth,
+    H = window.innerHeight;
   if (POST) setPostSize(W, H);
-  const r = 300, a = t * 0.00008;
+  const r = 300,
+    a = t * 0.00008;
   overview.position.set(Math.cos(a) * r, 190, Math.sin(a) * r);
   overview.lookAt(0, 0, 0);
   clearFrame();
@@ -539,14 +634,16 @@ function layoutHud() {
 function updateHud(ps, rects, ranks) {
   if (hudCells.length !== ps.length) layoutHud();
   const rankOf = placesFor(ranks);
-  const remaining = ps.filter(p => !p.finished).length;
+  const remaining = ps.filter((p) => !p.finished).length;
   const gateCount = G.track.gates.length;
   ps.forEach((p, i) => {
     const c = hudCells[i];
     if (!c) return;
     c.pos.textContent = rankOf.get(p.id) || 1;
     c.posden.textContent = '|' + (G.finishOrder.length + remaining);
-    c.lap.textContent = p.finished ? TOTAL_LAPS : Math.min(p.lap + 1, TOTAL_LAPS);
+    c.lap.textContent = p.finished
+      ? TOTAL_LAPS
+      : Math.min(p.lap + 1, TOTAL_LAPS);
     // lap progress bar (fraction of gates passed this lap)
     const frac = ((p.nextGate - 1 + gateCount) % gateCount) / gateCount;
     c.bar.style.width = Math.round((p.finished ? 1 : frac) * 100) + '%';
@@ -554,7 +651,7 @@ function updateHud(ps, rects, ranks) {
     const nitroTime = p.nitroTime || 0;
     c.nitro.classList.toggle('hidden', nitroTime <= 0);
     c.nitroTime.textContent = nitroTime.toFixed(1) + 's';
-    c.nitroBar.style.width = (nitroTime / NITRO.duration * 100) + '%';
+    c.nitroBar.style.width = (nitroTime / NITRO.duration) * 100 + '%';
     c.cell.classList.toggle('is-finished', p.finished);
     c.finish.classList.toggle('hidden', !p.finished);
     if (p.finished) {
@@ -562,11 +659,18 @@ function updateHud(ps, rects, ranks) {
       c.finishTime.textContent = formatTime(p.finishTime);
       c.bestLap.textContent = formatTime(p.bestLapTime);
       c.topSpeed.textContent = Math.round(p.topSpeed * MPH) + ' MPH';
-      c.waiting.textContent = remaining ? `Waiting for ${remaining} racer${remaining === 1 ? '' : 's'} to finish` : 'All racers finished';
+      c.waiting.textContent = remaining
+        ? `Waiting for ${remaining} racer${remaining === 1 ? '' : 's'} to finish`
+        : 'All racers finished';
     }
   });
 }
-function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function escapeHtml(s) {
+  return String(s).replace(
+    /[&<>"]/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c],
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Banner / countdown
@@ -584,7 +688,9 @@ function showBanner(text, ms) {
   if (bannerTimer) clearTimeout(bannerTimer);
   if (ms) bannerTimer = setTimeout(() => banner.classList.add('hidden'), ms);
 }
-function hideBanner() { banner.classList.add('hidden'); }
+function hideBanner() {
+  banner.classList.add('hidden');
+}
 
 // ---------------------------------------------------------------------------
 // Networking
@@ -612,18 +718,27 @@ socket.on('connect', () => {
   });
 });
 
-document.getElementById('addrSelect').addEventListener('change', (e) => setJoinUrl(e.target.value));
+document
+  .getElementById('addrSelect')
+  .addEventListener('change', (e) => setJoinUrl(e.target.value));
 
 function setJoinUrl(url) {
   document.getElementById('joinUrl').textContent = url;
   document.getElementById('qrImg').src = '/qr?text=' + encodeURIComponent(url);
 }
 
-socket.on('player:join', (p) => { addPlayer(p); });
-socket.on('player:leave', ({ id }) => { removePlayer(id); });
+socket.on('player:join', (p) => {
+  addPlayer(p);
+});
+socket.on('player:leave', ({ id }) => {
+  removePlayer(id);
+});
 socket.on('player:ready', ({ id, ready }) => {
   const p = G.players.get(id);
-  if (p) { p.ready = ready; updateLobby(); }
+  if (p) {
+    p.ready = ready;
+    updateLobby();
+  }
 });
 socket.on('player:input', ({ id, input }) => {
   const p = G.players.get(id);
@@ -653,14 +768,23 @@ autoAccelerate.addEventListener('change', () => {
   settingsPending = true;
   autoAccelerate.disabled = true;
   updateLobby();
-  socket.timeout(4000).emit('host:settings', { autoAccelerate: autoAccelerate.checked }, (error, response) => {
-    settingsPending = false;
-    applySettings(response?.settings || { autoAccelerate: G.autoAccelerate });
-    document.getElementById('settingsError').textContent = error
-      ? 'Could not confirm the driving mode. Please try again.' : (response?.error || '');
-    autoAccelerate.disabled = G.state !== 'lobby';
-    updateLobby();
-  });
+  socket
+    .timeout(4000)
+    .emit(
+      'host:settings',
+      { autoAccelerate: autoAccelerate.checked },
+      (error, response) => {
+        settingsPending = false;
+        applySettings(
+          response?.settings || { autoAccelerate: G.autoAccelerate },
+        );
+        document.getElementById('settingsError').textContent = error
+          ? 'Could not confirm the driving mode. Please try again.'
+          : response?.error || '';
+        autoAccelerate.disabled = G.state !== 'lobby';
+        updateLobby();
+      },
+    );
 });
 
 function updateLobby() {
@@ -704,7 +828,9 @@ startBtn.addEventListener('click', () => {
   if (activePlayers().length === 0 || settingsPending) return;
   // This click is the required user gesture for fullscreen.
   const el = document.documentElement;
-  try { (el.requestFullscreen || el.webkitRequestFullscreen || (() => {})).call(el); } catch (e) {}
+  try {
+    (el.requestFullscreen || el.webkitRequestFullscreen || (() => {})).call(el);
+  } catch (e) {}
   if (AUDIO_ENABLED) audio.initAudio();
   socket.emit('host:start');
 });
@@ -719,8 +845,14 @@ document.getElementById('restartBtn').addEventListener('click', () => {
   socket.emit('host:reset');
 });
 
-socket.on('game:start', (settings) => { applySettings(settings); startGame(); });
-socket.on('game:reset', (settings) => { applySettings(settings); backToLobby(); });
+socket.on('game:start', (settings) => {
+  applySettings(settings);
+  startGame();
+});
+socket.on('game:reset', (settings) => {
+  applySettings(settings);
+  backToLobby();
+});
 socket.on('disconnect', () => {
   backToLobby();
   for (const p of G.players.values()) audio.stopVoice(p.id);
@@ -732,9 +864,19 @@ socket.on('disconnect', () => {
 
 function setLight(mat, state) {
   if (!mat) return;
-  if (state === 'red') { mat.emissive.setHex(0xff1111); mat.emissiveIntensity = 2.4; mat.color.setHex(0x440000); }
-  else if (state === 'green') { mat.emissive.setHex(0x22ff44); mat.emissiveIntensity = 2.4; mat.color.setHex(0x004400); }
-  else { mat.emissive.setHex(0x330000); mat.emissiveIntensity = 0.25; mat.color.setHex(0x220000); }
+  if (state === 'red') {
+    mat.emissive.setHex(0xff1111);
+    mat.emissiveIntensity = 2.4;
+    mat.color.setHex(0x440000);
+  } else if (state === 'green') {
+    mat.emissive.setHex(0x22ff44);
+    mat.emissiveIntensity = 2.4;
+    mat.color.setHex(0x004400);
+  } else {
+    mat.emissive.setHex(0x330000);
+    mat.emissiveIntensity = 0.25;
+    mat.color.setHex(0x220000);
+  }
 }
 
 let raceEpoch = 0;
@@ -753,18 +895,30 @@ function startGame() {
   const lights = G.track.startLights || [];
   lights.forEach((m) => setLight(m, 'off'));
   for (let i = 0; i < lights.length; i++) {
-    setTimeout(() => { if (epoch === raceEpoch && G.state === 'countdown') setLight(lights[i], 'red'); }, 500 + i * 500);
+    setTimeout(
+      () => {
+        if (epoch === raceEpoch && G.state === 'countdown')
+          setLight(lights[i], 'red');
+      },
+      500 + i * 500,
+    );
   }
 
   // Discrete 3-2-1-GO countdown banner.
   showBanner('3', 0);
-  setTimeout(() => { if (epoch === raceEpoch && G.state === 'countdown') showBanner('2', 0); }, 1000);
-  setTimeout(() => { if (epoch === raceEpoch && G.state === 'countdown') showBanner('1', 0); }, 2000);
+  setTimeout(() => {
+    if (epoch === raceEpoch && G.state === 'countdown') showBanner('2', 0);
+  }, 1000);
+  setTimeout(() => {
+    if (epoch === raceEpoch && G.state === 'countdown') showBanner('1', 0);
+  }, 2000);
   setTimeout(() => {
     if (epoch !== raceEpoch || G.state !== 'countdown') return;
     showBanner('GO!', 900);
     lights.forEach((m) => setLight(m, 'green'));
-    setTimeout(() => { if (epoch === raceEpoch) lights.forEach((m) => setLight(m, 'off')); }, 1200);
+    setTimeout(() => {
+      if (epoch === raceEpoch) lights.forEach((m) => setLight(m, 'off'));
+    }, 1200);
     G.state = 'racing';
     G.raceStart = performance.now();
   }, 3000);
@@ -776,15 +930,19 @@ function endRace() {
   audio.silenceAll();
   const ranks = G.finishOrder;
   document.getElementById('resultsTitle').textContent = 'Results';
-  document.getElementById('standings').innerHTML = ranks.map((p, i) => {
-    const place = i + 1;
-    const time = p.finished ? formatTime(p.finishTime) : `${p.lap} lap${p.lap === 1 ? '' : 's'}`;
-    return `<div class="standing">
-      <span class="rank">${['🥇', '🥈', '🥉'][i] || (place + '.')}</span>
+  document.getElementById('standings').innerHTML = ranks
+    .map((p, i) => {
+      const place = i + 1;
+      const time = p.finished
+        ? formatTime(p.finishTime)
+        : `${p.lap} lap${p.lap === 1 ? '' : 's'}`;
+      return `<div class="standing">
+      <span class="rank">${['🥇', '🥈', '🥉'][i] || place + '.'}</span>
       <span class="sname">${escapeHtml(p.name)}</span>
       <span class="stime">${time}</span>
     </div>`;
-  }).join('');
+    })
+    .join('');
   resultsEl.classList.remove('hidden');
   hideBanner();
 }
@@ -803,7 +961,11 @@ function backToLobby() {
   (G.track.startLights || []).forEach((m) => setLight(m, 'off'));
   for (const p of G.players.values()) {
     p.nitroTime = 0;
-    if (p.mesh) { scene.remove(p.mesh); disposeCarMesh(p.mesh); p.mesh = null; }
+    if (p.mesh) {
+      scene.remove(p.mesh);
+      disposeCarMesh(p.mesh);
+      p.mesh = null;
+    }
   }
   resultsEl.classList.add('hidden');
   lobbyEl.classList.remove('hidden');
@@ -830,9 +992,15 @@ const smokeTex = makeSmokeTexture();
 const SMOKE_MAX = 140;
 const smokePool = [];
 for (let i = 0; i < SMOKE_MAX; i++) {
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: smokeTex, transparent: true, opacity: 0, depthWrite: false, color: 0xcccccc,
-  }));
+  const sp = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: smokeTex,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      color: 0xcccccc,
+    }),
+  );
   sp.visible = false;
   scene.add(sp);
   smokePool.push({ sp, age: 0, life: 0, vy: 0, base: 1 });
@@ -841,7 +1009,10 @@ let smokeIdx = 0;
 function spawnSmoke(x, y, z, scale) {
   const p = smokePool[smokeIdx];
   smokeIdx = (smokeIdx + 1) % SMOKE_MAX;
-  p.age = 0; p.life = 0.7 + Math.random() * 0.5; p.vy = 1.2 + Math.random() * 1.4; p.base = scale;
+  p.age = 0;
+  p.life = 0.7 + Math.random() * 0.5;
+  p.vy = 1.2 + Math.random() * 1.4;
+  p.base = scale;
   p.sp.visible = true;
   p.sp.position.set(x, y, z);
   p.sp.scale.setScalar(scale);
@@ -851,7 +1022,10 @@ function updateSmoke(dt) {
     if (!p.sp.visible) continue;
     p.age += dt;
     const t = p.age / p.life;
-    if (t >= 1) { p.sp.visible = false; continue; }
+    if (t >= 1) {
+      p.sp.visible = false;
+      continue;
+    }
     p.sp.position.y += p.vy * dt;
     p.sp.scale.setScalar(p.base * (1 + t * 2.4));
     p.sp.material.opacity = (1 - t) * 0.4;
@@ -873,7 +1047,8 @@ function makeSmokeTexture() {
   const g = ctx.createRadialGradient(32, 32, 2, 32, 32, 32);
   g.addColorStop(0, 'rgba(255,255,255,0.9)');
   g.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
   return new THREE.CanvasTexture(c);
 }
 
@@ -884,10 +1059,15 @@ const SKID_MAX = 800;
 const skidMesh = new THREE.InstancedMesh(
   new THREE.PlaneGeometry(0.55, 1.5),
   new THREE.MeshBasicMaterial({
-    color: 0x0a0a0a, transparent: true, opacity: 0.5, depthWrite: false,
-    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    color: 0x0a0a0a,
+    transparent: true,
+    opacity: 0.5,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
   }),
-  SKID_MAX
+  SKID_MAX,
 );
 skidMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 skidMesh.frustumCulled = false;
@@ -898,7 +1078,9 @@ skidMesh.instanceMatrix.needsUpdate = true;
 scene.add(skidMesh);
 
 let skidIdx = 0;
-const _skidFlat = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+const _skidFlat = new THREE.Quaternion().setFromEuler(
+  new THREE.Euler(-Math.PI / 2, 0, 0),
+);
 const _skidYaw = new THREE.Quaternion();
 const _skidQ = new THREE.Quaternion();
 const _skidUp = new THREE.Vector3(0, 1, 0);
@@ -927,10 +1109,16 @@ function updateRace(dt) {
   while (accumulated >= SIM_STEP) {
     for (const p of G.players.values()) {
       savePreviousPose(p);
-      updateCar(p, SIM_STEP, G.track, { dropSkid, onGate: updateGates, autoAccelerate: G.autoAccelerate });
+      updateCar(p, SIM_STEP, G.track, {
+        dropSkid,
+        onGate: updateGates,
+        autoAccelerate: G.autoAccelerate,
+      });
     }
     handleCollisions();
-    updateNitroPickups(G.nitroPickups, G.players.values(), SIM_STEP, (p) => feedback(p, { vibrate: 70 }));
+    updateNitroPickups(G.nitroPickups, G.players.values(), SIM_STEP, (p) =>
+      feedback(p, { vibrate: 70 }),
+    );
     accumulated -= SIM_STEP;
   }
   for (const p of G.players.values()) {
@@ -952,7 +1140,10 @@ function loop(now) {
       emitCarSmoke(p);
       audio.setEngine(p.id, p.rpm, PHYS.redline);
       audio.setSqueal(p.id, p.squeal);
-      if (p.shiftPulse > 0) { audio.shift(p.id); p.shiftPulse = 0; }
+      if (p.shiftPulse > 0) {
+        audio.shift(p.id);
+        p.shiftPulse = 0;
+      }
     }
     updateSmoke(dt);
     sendFeedback(now);
