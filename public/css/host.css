@@ -17,6 +17,33 @@ html, body {
 
 #scene { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
 
+.driving-mode {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 4px 6px; text-align: left;
+  border: 1px solid rgba(85, 197, 250, 0.45); border-radius: 10px;
+  background: #0a171e; cursor: pointer;
+}
+.driving-mode strong { display: block; font-size: 12px; white-space: nowrap; }
+.code-step { align-items: center; }
+.code-step .num { margin-top: 0; }
+.code-mode-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.code-label { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.code-step .code { font-size: 20px; letter-spacing: 3px; }
+#autoAccelerate {
+  appearance: none; flex: 0 0 44px; width: 44px; height: 24px;
+  border: 1px solid #63808e; border-radius: 20px; padding: 2px; margin: 0;
+  background: #25363e; cursor: pointer;
+}
+#autoAccelerate::before {
+  content: ''; display: block; width: 18px; height: 18px;
+  border-radius: 50%; background: #fff; transition: transform 0.15s;
+}
+#autoAccelerate:checked { background: #1682ad; border-color: #55c5fa; }
+#autoAccelerate:checked::before { transform: translateX(20px); }
+#autoAccelerate:disabled { opacity: 0.5; cursor: wait; }
+#settingsError:empty { display: none; }
+#settingsError { color: #ffaaa3; margin-left: 36px; }
+
 /* ---------------- HUD ---------------- */
 #hud { position: fixed; inset: 0; pointer-events: none; }
 
@@ -45,7 +72,11 @@ html, body {
   margin: 4px auto 0; width: 80%; height: 8px; border-radius: 999px;
   background: rgba(0,0,0,0.5); overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.6);
 }
-.hud-bar i { display: block; height: 100%; width: 0%; transition: width 0.2s linear; }
+.hud-bar i {
+  display: block; height: 100%; width: 0%;
+  background: var(--bar-color); box-shadow: 0 0 8px var(--bar-color);
+  transition: width 0.2s linear;
+}
 
 .hud-speed {
   position: absolute; right: 14px; bottom: 8px;
@@ -129,7 +160,7 @@ html, body {
 .qr img { width: 240px; height: 240px; display: block; image-rendering: pixelated; }
 .scan-hint { color: #0b1020; font-size: 12px; margin-top: 6px; font-weight: 600; }
 .join-info { text-align: left; max-width: 380px; }
-.step { display: flex; align-items: flex-start; gap: 10px; margin: 10px 0; opacity: 0.92; }
+.step { display: flex; align-items: flex-start; gap: 60px; margin: 10px 0; opacity: 0.92; }
 .step .num {
   flex: none; width: 26px; height: 26px; border-radius: 50%;
   background: #2b3c63; display: inline-flex; align-items: center; justify-content: center;

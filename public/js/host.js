@@ -31,6 +31,7 @@ const AUDIO_ENABLED = false; // Temporary: keep the host game silent.
 // ---------------------------------------------------------------------------
 const G = {
   state: 'lobby', // lobby | countdown | racing | results
+  autoAccelerate: true,
   players: new Map(), // socketId -> player
   assetsReady: false, // real car model loaded?
   environmentReady: false,
@@ -492,7 +493,7 @@ function layoutHud() {
         <div class="hud-stat left"><span class="lbl">POS</span><span class="num" data-pos>1</span><span class="den" data-posden>|${ps.length}</span></div>
         <div class="hud-driver">
           <div class="hud-name" style="color:color-mix(in srgb, ${p.color} 55%, white)">${escapeHtml(p.name)}</div>
-          <div class="hud-bar"><i data-bar style="background:${p.color}"></i></div>
+          <div class="hud-bar"><i data-bar style="--bar-color:color-mix(in srgb, ${p.color} 35%, white)"></i></div>
         </div>
         <div class="hud-stat right"><span class="lbl">LAP</span><span class="num" data-lap>1</span><span class="den">|${TOTAL_LAPS}</span></div>
       </div>
@@ -591,7 +592,8 @@ function hideBanner() { banner.classList.add('hidden'); }
 const socket = io();
 
 socket.on('connect', () => {
-  socket.emit('host:create', {}, ({ code, url, port, addresses }) => {
+  socket.emit('host:create', {}, ({ code, url, port, addresses, settings }) => {
+    applySettings(settings);
     document.getElementById('disconnected').classList.add('hidden');
     document.getElementById('joinCode').textContent = code;
     setJoinUrl(url);
@@ -639,6 +641,27 @@ const lobbyEl = document.getElementById('lobby');
 const resultsEl = document.getElementById('results');
 const startBtn = document.getElementById('startBtn');
 const lobbyPlayers = document.getElementById('lobbyPlayers');
+const autoAccelerate = document.getElementById('autoAccelerate');
+let settingsPending = false;
+
+function applySettings(settings) {
+  G.autoAccelerate = settings?.autoAccelerate !== false;
+  autoAccelerate.checked = G.autoAccelerate;
+}
+socket.on('game:settings', applySettings);
+autoAccelerate.addEventListener('change', () => {
+  settingsPending = true;
+  autoAccelerate.disabled = true;
+  updateLobby();
+  socket.timeout(4000).emit('host:settings', { autoAccelerate: autoAccelerate.checked }, (error, response) => {
+    settingsPending = false;
+    applySettings(response?.settings || { autoAccelerate: G.autoAccelerate });
+    document.getElementById('settingsError').textContent = error
+      ? 'Could not confirm the driving mode. Please try again.' : (response?.error || '');
+    autoAccelerate.disabled = G.state !== 'lobby';
+    updateLobby();
+  });
+});
 
 function updateLobby() {
   const ps = activePlayers();
@@ -661,7 +684,10 @@ function updateLobby() {
   }
   lobbyPlayers.innerHTML = html;
 
-  if (!G.assetsReady) {
+  if (settingsPending) {
+    startBtn.disabled = true;
+    startBtn.textContent = 'Updating driving mode…';
+  } else if (!G.assetsReady) {
     startBtn.disabled = true;
     startBtn.textContent = 'Loading 3D car…';
   } else if (ps.length === 0) {
@@ -675,7 +701,7 @@ function updateLobby() {
 updateLobby();
 
 startBtn.addEventListener('click', () => {
-  if (activePlayers().length === 0) return;
+  if (activePlayers().length === 0 || settingsPending) return;
   // This click is the required user gesture for fullscreen.
   const el = document.documentElement;
   try { (el.requestFullscreen || el.webkitRequestFullscreen || (() => {})).call(el); } catch (e) {}
@@ -693,8 +719,8 @@ document.getElementById('restartBtn').addEventListener('click', () => {
   socket.emit('host:reset');
 });
 
-socket.on('game:start', startGame);
-socket.on('game:reset', backToLobby);
+socket.on('game:start', (settings) => { applySettings(settings); startGame(); });
+socket.on('game:reset', (settings) => { applySettings(settings); backToLobby(); });
 socket.on('disconnect', () => {
   backToLobby();
   for (const p of G.players.values()) audio.stopVoice(p.id);
@@ -721,6 +747,7 @@ function startGame() {
   resultsEl.classList.add('hidden');
   G.winnerId = null;
   G.state = 'countdown';
+  autoAccelerate.disabled = true;
 
   // F1 start lights: 5 reds illuminate one-by-one, then all go out = GO.
   const lights = G.track.startLights || [];
@@ -765,6 +792,7 @@ function endRace() {
 function backToLobby() {
   raceEpoch++;
   G.state = 'lobby';
+  autoAccelerate.disabled = settingsPending;
   G.winnerId = null;
   G.finishOrder = [];
   hud.innerHTML = '';
@@ -899,7 +927,7 @@ function updateRace(dt) {
   while (accumulated >= SIM_STEP) {
     for (const p of G.players.values()) {
       savePreviousPose(p);
-      updateCar(p, SIM_STEP, G.track, { dropSkid, onGate: updateGates });
+      updateCar(p, SIM_STEP, G.track, { dropSkid, onGate: updateGates, autoAccelerate: G.autoAccelerate });
     }
     handleCollisions();
     updateNitroPickups(G.nitroPickups, G.players.values(), SIM_STEP, (p) => feedback(p, { vibrate: 70 }));

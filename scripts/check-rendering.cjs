@@ -10,10 +10,11 @@ const chrome = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Applic
 const scale = process.argv.includes('--dpr=2') ? 2 : 1;
 const profileCar = process.argv.includes('--profile-car');
 const profileForest = process.argv.includes('--profile-forest');
+const checkController = process.argv.includes('--controller');
 const app = express();
 let browser, timeout, received = false, debugOrigin;
 app.post('/capture-ui/:name', async (req, res) => {
-  if (!['finish-waiting', 'race-results'].includes(req.params.name)) return res.sendStatus(400);
+  if (!['lobby', 'finish-waiting', 'race-results', 'controller-auto', 'controller-manual', 'controller-portrait'].includes(req.params.name)) return res.sendStatus(400);
   try {
     const tabs = await (await fetch(debugOrigin + '/json/list')).json();
     const tab = tabs.find(tab => tab.type === 'page');
@@ -58,10 +59,45 @@ app.post('/render-result', express.json({ limit: '32mb' }), (req, res) => {
   browser.kill();
 });
 app.get('/', (_req, res) => {
+  if (checkController) {
+    const html = fs.readFileSync(path.join(root, 'public/controller.html'), 'utf8')
+      .replace('<script src="/socket.io/socket.io.js"></script>', `<script>
+        window.io = () => ({ connected: true, on() {}, emit(name, data, cb) {
+          if (name === 'ctrl:join') cb({ ok: true, slot: 0, color: '#55c5fa', settings: { autoAccelerate: true } });
+        } });
+      </script>`)
+      .replace('src="js/controller.js"', 'src="/controller-check.js"');
+    return res.type('html').send(html);
+  }
   const html = fs.readFileSync(path.join(root, 'public/index.html'), 'utf8')
     .replace('<script src="/socket.io/socket.io.js"></script>', '<script>window.io = () => ({ on() {}, emit() {} });</script>')
     .replace(/src="js\/host\.js[^"]*"/, 'src="/' + (profileCar ? 'profile-car.mjs' : profileForest ? 'profile-forest.mjs' : 'render-check.mjs') + '"');
   res.type('html').send(html);
+});
+app.get('/controller-check.js', (_req, res) => res.type('js').send(
+  fs.readFileSync(path.join(root, 'public/js/controller.js'), 'utf8') + '\n' +
+  fs.readFileSync(path.join(root, 'scripts/check-controller.js'), 'utf8')
+));
+app.post('/controller-viewport/:orientation', async (req, res) => {
+  try {
+    const portrait = req.params.orientation === 'portrait';
+    const tabs = await (await fetch(debugOrigin + '/json/list')).json();
+    const tab = tabs.find(tab => tab.type === 'page');
+    await new Promise((resolve, reject) => {
+      const ws = new WebSocket(tab.webSocketDebuggerUrl);
+      const timer = setTimeout(() => { ws.close(); reject(new Error('Viewport timed out')); }, 10000);
+      ws.addEventListener('open', () => ws.send(JSON.stringify({ id: 1, method: 'Emulation.setDeviceMetricsOverride',
+        params: { width: portrait ? 375 : 812, height: portrait ? 667 : 375, deviceScaleFactor: 1, mobile: true } })));
+      ws.addEventListener('message', event => {
+        const reply = JSON.parse(event.data);
+        if (reply.id !== 1) return;
+        clearTimeout(timer); ws.close();
+        if (reply.error) reject(new Error(reply.error.message)); else resolve();
+      });
+      ws.addEventListener('error', () => { clearTimeout(timer); reject(new Error('Viewport connection failed')); });
+    });
+    res.sendStatus(200);
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 app.get('/js/host.js', (_req, res) => {
   // Stop only the scheduled loop, so each test can inspect a completed frame.
@@ -241,6 +277,12 @@ try {
   if (centre < 0.7 || centre > 0.85 || shoulder < 0.9 || shoulder - centre < 0.08 || asphalt.metalness !== 0 || asphalt.envMapIntensity > 0.85) throw new Error('Dry asphalt must retain subtle wear without a glossy reflection stripe');
   bloom = checkBloom();
   renderOverview(0);
+  const code = document.getElementById('joinCode').getBoundingClientRect();
+  const mode = document.querySelector('.driving-mode').getBoundingClientRect();
+  if (mode.left <= code.right || Math.abs(mode.top - code.top) > 30) throw new Error('Driving mode is not beside the room code');
+  const lobbyCapture = await fetch('/capture-ui/lobby', { method: 'POST' });
+  if (!lobbyCapture.ok) throw new Error('Lobby capture failed');
+  const lobbyScreenshotPath = (await lobbyCapture.json()).screenshotPath;
   document.getElementById('lobby').classList.add('hidden');
   for (let count = 1; count <= 4; count++) {
     const i = count - 1;
@@ -444,7 +486,7 @@ try {
   const stands = scene.getObjectByName('track-scenery').children.filter(child => child.isLOD);
   const scenery = { trees: forest.count, forestTriangles: forest.count * forest.geometry.index.count / 3, treeAtlasLoaded: forest.userData.textureReady, nearTreeCandidates: forest.userData.nearCandidates.length, nearTreeLimit: 8, nearTreeMaterials: sceneryRoot.userData.forestDetails.meshes.length, grandstands: stands.length };
   const finishing = await checkFinishing();
-  report.textContent = JSON.stringify({ devicePixelRatio, motion, nitro, bloom, carShadow, scenery, finishing, cases, screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, smokeScreenshot, exhaustScreenshot, shadowOffScreenshot });
+  report.textContent = JSON.stringify({ devicePixelRatio, lobbyScreenshotPath, motion, nitro, bloom, carShadow, scenery, finishing, cases, screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, smokeScreenshot, exhaustScreenshot, shadowOffScreenshot });
 } catch (error) { report.textContent = JSON.stringify({ error: error.stack }); }
 await fetch('/render-result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: report.textContent });
 `));

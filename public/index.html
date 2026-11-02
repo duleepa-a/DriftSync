@@ -39,14 +39,34 @@
           <div class="scan-hint">Scan with your phone camera</div>
         </div>
         <div class="join-info">
-          <div class="step"><span class="num">1</span><span class="txt">Connect your phone to the <b>same Wi-Fi</b> as this laptop.</span></div>
-          <div class="step"><span class="num">2</span><span class="txt">Scan the QR code, or open this address:</span></div>
+          <div class="step">
+            <span class="num">1</span>
+            <span class="txt">Connect your phone to the <b>same Wi-Fi</b> as this laptop.</span>
+          </div>
+          <div class="step">
+            <span class="num">2</span>
+            <span class="txt">Scan the QR code, or open this address:</span>
+          </div>
           <div class="url" id="joinUrl">…</div>
           <div class="addr-switch">
             Can't connect? Try another address:
             <select id="addrSelect"></select>
           </div>
-          <div class="step"><span class="num">3</span><span class="txt">Enter code:   <span class="code" id="joinCode">····</span></span></div>
+          <div class="step code-step">
+            <span class="num">3</span>
+            <span class="txt">
+              <span class="code-mode-row">
+                <span class="code-label">Enter code: 
+                  <span class="code" id="joinCode">····</span>
+                </span>
+                <label class="driving-mode" for="autoAccelerate">
+                  <strong>Auto accel</strong>
+                  <input id="autoAccelerate" type="checkbox" role="switch" checked />
+                </label>
+              </span>
+            </span>
+          </div>
+          <div id="settingsError" class="hint" role="status"></div>
         </div>
       </div>
 
@@ -68,7 +88,10 @@
   </div>
 
   <div id="disconnected" class="hidden">
-    <div class="lobby-card"><h1>Connection lost</h1><p>Refresh this page to start a new game.</p></div>
+    <div class="lobby-card">
+      <h1>Connection lost</h1>
+      <p>Refresh this page to start a new game.</p>
+    </div>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
