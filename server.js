@@ -23,7 +23,6 @@ const MAX_PLAYERS = 4;
 
 // Per-slot identity. Index 0..3 map to player 1..4.
 const PLAYER_COLORS = ['#000000', '#8F0707', '#003366', '#DE6B13']; // original black, dark red, navy, orange
-const PLAYER_NAMES = ['Red', 'Blue', 'Green', 'Orange'];
 
 const app = express();
 const server = http.createServer(app);
@@ -64,7 +63,7 @@ app.get('/qr', async (req, res) => {
 });
 
 // --- Rooms ---------------------------------------------------------------
-/** code -> { hostId, started, players: Map<socketId, player> } */
+/** code -> { hostId, started, settings, players: Map<socketId, player> } */
 const rooms = new Map();
 
 // Score a network interface so we prefer the real Wi-Fi/Ethernet adapter and
@@ -133,10 +132,12 @@ function controllerRoom(socket) {
 function validInput(input) {
   if (!input || typeof input !== 'object' ||
       typeof input.steer !== 'number' || !Number.isFinite(input.steer) ||
-      typeof input.brake !== 'number' || !Number.isFinite(input.brake)) return null;
+      typeof input.brake !== 'number' || !Number.isFinite(input.brake) ||
+      (input.throttle !== undefined && (typeof input.throttle !== 'number' || !Number.isFinite(input.throttle)))) return null;
   return {
     steer: Math.max(-1, Math.min(1, input.steer)),
     brake: Math.max(0, Math.min(1, input.brake)),
+    throttle: Math.max(0, Math.min(1, input.throttle ?? 0)),
   };
 }
 
@@ -145,7 +146,8 @@ io.on('connection', (socket) => {
   socket.on('host:create', (_payload, cb) => {
     if (socket.data.role) return cb?.({ error: 'Already in a game.' });
     const code = makeCode();
-    rooms.set(code, { hostId: socket.id, started: false, players: new Map() });
+    const settings = { autoAccelerate: true };
+    rooms.set(code, { hostId: socket.id, started: false, settings, players: new Map() });
     socket.join(code);
     socket.data.role = 'host';
     socket.data.code = code;
@@ -155,7 +157,19 @@ io.on('connection', (socket) => {
     // Offer every usable address so the user can switch if the default is wrong.
     const addresses = [ip, ...lanCandidates().map((c) => c.address)]
       .filter((a, i, arr) => arr.indexOf(a) === i);
-    if (typeof cb === 'function') cb({ code, url, ip, port: PORT, addresses });
+    if (typeof cb === 'function') cb({ code, url, ip, port: PORT, addresses, settings });
+  });
+
+  socket.on('host:settings', (settings, cb) => {
+    const room = hostRoom(socket);
+    if (!room) return cb?.({ ok: false, error: 'Only the host can change the driving mode.' });
+    if (room.started) return cb?.({ ok: false, error: 'Change the driving mode in the lobby.', settings: room.settings });
+    if (typeof settings?.autoAccelerate !== 'boolean') {
+      return cb?.({ ok: false, error: 'Invalid driving mode.', settings: room.settings });
+    }
+    room.settings = { autoAccelerate: settings.autoAccelerate };
+    io.to(socket.data.code).emit('game:settings', room.settings);
+    cb?.({ ok: true, settings: room.settings });
   });
 
   // Host can (re)broadcast a request for current players (e.g. after reload).
@@ -174,7 +188,7 @@ io.on('connection', (socket) => {
     const existing = room.players.get(socket.id);
     if (existing) {
       return cb && cb({ ok: true, slot: existing.slot, color: existing.color,
-        name: existing.name, started: room.started });
+        name: existing.name, started: room.started, settings: room.settings });
     }
     if (socket.data.code && socket.data.code !== code) {
       return cb && cb({ ok: false, error: 'Already connected to another game. Reload to switch.' });
@@ -189,7 +203,7 @@ io.on('connection', (socket) => {
       id: socket.id,
       slot,
       color: PLAYER_COLORS[slot],
-      name: name || PLAYER_NAMES[slot],
+      name: (typeof name === 'string' && name.trim()) || `Player ${slot + 1}`,
       ready: false,
     };
     room.players.set(socket.id, player);
@@ -199,7 +213,7 @@ io.on('connection', (socket) => {
     socket.data.slot = slot;
 
     io.to(room.hostId).emit('player:join', player);
-    if (cb) cb({ ok: true, slot, color: player.color, name: player.name, started: room.started });
+    if (cb) cb({ ok: true, slot, color: player.color, name: player.name, started: room.started, settings: room.settings });
   });
 
   // ---- Controller -> Host: input (high frequency) ----
@@ -232,13 +246,13 @@ io.on('connection', (socket) => {
     const room = hostRoom(socket);
     if (!room || room.players.size === 0 || room.started) return;
     room.started = true;
-    io.to(socket.data.code).emit('game:start');
+    io.to(socket.data.code).emit('game:start', room.settings);
   });
   socket.on('host:reset', () => {
     const room = hostRoom(socket);
     if (!room) return;
     room.started = false;
-    io.to(socket.data.code).emit('game:reset');
+    io.to(socket.data.code).emit('game:reset', room.settings);
   });
 
   socket.on('disconnect', () => {

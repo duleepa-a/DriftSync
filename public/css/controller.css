@@ -178,3 +178,34 @@ button:not(.drive):active { transform: scale(0.98); }
   background: #d63031; z-index: 100; font-weight: 700;
 }
 .banner a { color: #fff; }
+
+/* Manual mode: compact steering at the left thumb, pedals at the right. */
+#controller.manual #drivePad {
+  inset: 66px max(22px, env(safe-area-inset-right)) max(48px, calc(env(safe-area-inset-bottom) + 30px)) max(22px, env(safe-area-inset-left));
+  grid-template-columns: repeat(2, clamp(54px, 11vw, 88px)) minmax(12px, 1fr) repeat(2, clamp(60px, 13vw, 104px));
+  gap: clamp(8px, 1.8vw, 18px); align-items: end;
+}
+.manual .drive { transform: none; border-radius: 18px; }
+.manual .drive .drive-content { transform: none; }
+.manual .drive::before { border-radius: 11px; }
+.manual .drive.steer { height: clamp(64px, 22vh, 90px); }
+.manual .drive.left { grid-column: 1; grid-row: 1; }
+.manual .drive.right { grid-column: 2; grid-row: 1; }
+.manual .drive .chevron { font-size: clamp(28px, 5vw, 42px); }
+.manual .drive.brake { grid-column: 4; grid-row: 1; height: min(120px, 45vh); }
+.manual .drive.accelerator {
+  --edge: #74e6a5; color: #c5ffdc;
+  grid-column: 5; grid-row: 1; height: min(164px, 55vh);
+}
+.manual .drive strong { font-size: clamp(12px, 2.2vw, 20px); }
+.manual .drive small { font-size: clamp(8px, 1.3vw, 11px); }
+.manual .drive.accelerator small { color: #9adfba; }
+.pedal-grip {
+  width: 28px; height: 38px; margin-bottom: 8px;
+  background: repeating-linear-gradient(0deg, #74e6a570 0 3px, transparent 3px 8px);
+}
+.manual #autoHint { bottom: max(12px, env(safe-area-inset-bottom)); font-size: 10px; }
+@media (max-width: 420px) {
+  #controller.manual #drivePad { left: 14px; right: 14px; gap: 7px; grid-template-columns: 50px 50px minmax(0, 1fr) 60px 64px; }
+  .manual #autoHint { left: 14px; right: 14px; }
+}

@@ -5,6 +5,7 @@ export const PHYS = {
   maxSpeed: 46,
   accel: 26,
   dragK: 0.004,
+  coastDecel: 3,
   brakeDecel: 55,
   reverseAccel: 16,
   reverseMax: -12,
@@ -19,12 +20,13 @@ const ahead = new THREE.Vector3();
 const skid = new THREE.Vector3();
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-export function updateCar(p, dt, track, { dropSkid, onGate }) {
+export function updateCar(p, dt, track, { dropSkid, onGate, autoAccelerate = true }) {
   if (p.finished) return;
   const inp = p.input;
   p.steerSmooth += (clamp(inp.steer, -1, 1) - p.steerSmooth) * Math.min(1, dt * 12);
   const steer = p.steerSmooth;
   const brake = clamp(inp.brake || 0, 0, 1);
+  const throttle = autoAccelerate ? 1 : clamp(inp.throttle || 0, 0, 1);
   if (brake > 0.02 || p.finished) p.nitroTime = 0;
   const boosting = (p.nitroTime || 0) > 0 && p.speed >= 0;
   p.nitroTime = Math.max(0, (p.nitroTime || 0) - dt);
@@ -33,9 +35,13 @@ export function updateCar(p, dt, track, { dropSkid, onGate }) {
   if (brake > 0.02) {
     if (p.speed > 0.2) p.speed -= PHYS.brakeDecel * brake * dt;
     else p.speed -= PHYS.reverseAccel * brake * dt;
+  } else if (throttle <= 0.02) {
+    // Coasting slows both forward and reverse motion without crossing zero.
+    const decel = (PHYS.coastDecel + PHYS.dragK * p.speed * p.speed) * dt;
+    p.speed = Math.sign(p.speed) * Math.max(0, Math.abs(p.speed) - decel);
   } else if (p.speed <= speedLimit) {
     const drag = PHYS.dragK * p.speed * Math.abs(p.speed);
-    p.speed = Math.min(speedLimit, p.speed + (PHYS.accel + (boosting ? NITRO.extraAccel : 0) - drag) * dt);
+    p.speed = Math.min(speedLimit, p.speed + ((PHYS.accel + (boosting ? NITRO.extraAccel : 0)) * throttle - drag) * dt);
   } else {
     // Let boost speed bleed off smoothly instead of snapping to the normal cap.
     p.speed = Math.max(speedLimit, p.speed - NITRO.coastDecel * dt);

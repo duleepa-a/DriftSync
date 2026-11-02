@@ -194,6 +194,46 @@ test('default driving launches and stays within the real track', () => {
   }
 });
 
+test('manual driving waits for throttle, coasts to rest, and gives brake priority', () => {
+  const track = { halfWidth: 100, nearestInfo: () => ({ index: 0, offset: 0, groundY: 0 }) };
+  const p = {
+    input: { steer: 0, brake: 0, throttle: 0 }, steerSmooth: 0,
+    speed: 0, prevSpeed: 0, gear: 0, pos: new THREE.Vector3(),
+    heading: 0, sampleIndex: 0, groundY: 0, mesh: new THREE.Group(),
+  };
+  const hooks = { dropSkid() {}, onGate() {}, autoAccelerate: false };
+  const step = (frames = 60) => { for (let i = 0; i < frames; i++) updateCar(p, 1 / 60, track, hooks); };
+  step();
+  assert.equal(p.speed, 0);
+  assert.equal(p.pos.z, 0);
+  p.input.throttle = 1;
+  step();
+  assert.ok(p.speed > 20);
+  const movingSpeed = p.speed;
+  p.input.throttle = 0;
+  step();
+  assert.ok(p.speed > 0 && p.speed < movingSpeed);
+  step(1200);
+  assert.equal(p.speed, 0);
+  p.input.throttle = 1;
+  step();
+  p.input.brake = 1;
+  const brakingSpeed = p.speed;
+  step(1);
+  assert.ok(p.speed < brakingSpeed, 'brake overrides a held accelerator');
+  step();
+  assert.ok(p.speed < 0, 'holding brake from rest reverses');
+  p.input = { steer: 0, brake: 0, throttle: 0 };
+  step(600);
+  assert.equal(Math.abs(p.speed), 0, 'reverse coasting stops without accelerating forward');
+  p.nitroTime = 2;
+  step(1);
+  assert.equal(Math.abs(p.speed), 0, 'nitro must not launch a manual car without throttle');
+  p.input.throttle = 1;
+  step();
+  assert.ok(p.speed > movingSpeed, 'nitro still boosts when the pedal is held');
+});
+
 test('turning alone leaves no tire marks; hard braking and wall impact leave two', () => {
   const track = {
     halfWidth: 10,

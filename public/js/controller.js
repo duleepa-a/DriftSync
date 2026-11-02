@@ -2,7 +2,7 @@
 /**
  * Phone controller — button steering.
  *  - LEFT / RIGHT steer, BRAKE slows down (and reverses from a stop).
- *  - The car accelerates automatically, so there is no gas button.
+ *  - The host selects automatic acceleration or manual pedals for the room.
  *  - Keyboard fallback (arrows / A,D, Down/Space) for testing on a laptop.
  *  - Sends input ~25x/sec; receives feedback (vibrate, place, lap, speed).
  */
@@ -19,6 +19,8 @@ const els = {
   leftBtn: document.getElementById('leftBtn'),
   rightBtn: document.getElementById('rightBtn'),
   brakeBtn: document.getElementById('brakeBtn'),
+  acceleratorBtn: document.getElementById('acceleratorBtn'),
+  autoHint: document.getElementById('autoHint'),
   placeBadge: document.getElementById('placeBadge'),
   lapBadge: document.getElementById('lapBadge'),
   speedBadge: document.getElementById('speedBadge'),
@@ -28,8 +30,10 @@ const els = {
   lostBanner: document.getElementById('lostBanner'),
 };
 
-const input = { steer: 0, brake: 0 };
-const held = { left: false, right: false, brake: false };
+const input = { steer: 0, brake: 0, throttle: 0 };
+const held = { left: false, right: false, brake: false, throttle: false };
+const pointers = { left: new Set(), right: new Set(), brake: new Set(), throttle: new Set() };
+let autoAccelerate = true;
 let joined = false;
 let joinPending = false;
 let fullscreenAttempted = false;
@@ -65,6 +69,7 @@ function doJoin() {
       return;
     }
     joined = true;
+    applySettings(res.settings);
     els.lostBanner.classList.add('hidden');
     document.documentElement.style.setProperty('--mycolor', res.color);
     els.placeBadge.textContent = 'P' + (res.slot + 1);
@@ -101,41 +106,70 @@ function lockLandscape() {
 bindButton(els.leftBtn, 'left');
 bindButton(els.rightBtn, 'right');
 bindButton(els.brakeBtn, 'brake');
+bindButton(els.acceleratorBtn, 'throttle');
 
 function bindButton(el, key) {
   const down = (e) => {
     e.preventDefault();
-    held[key] = true; el.classList.add('pressed'); recompute(); buzz(8);
+    el.setPointerCapture(e.pointerId);
+    pointers[key].add(e.pointerId);
+    fromKeys(); buzz(8);
   };
-  const up = (e) => { e.preventDefault(); held[key] = false; el.classList.remove('pressed'); recompute(); };
+  const up = (e) => { e.preventDefault(); pointers[key].delete(e.pointerId); fromKeys(); };
   el.addEventListener('pointerdown', down);
   el.addEventListener('pointerup', up);
   el.addEventListener('pointercancel', up);
-  el.addEventListener('pointerleave', up);
+  el.addEventListener('lostpointercapture', up);
 }
 
 function recompute() {
   // LEFT button steers left, RIGHT steers right.
   input.steer = (held.left ? 1 : 0) - (held.right ? 1 : 0);
   input.brake = held.brake ? 1 : 0;
+  input.throttle = !autoAccelerate && held.throttle ? 1 : 0;
 }
 
 // ---------------------------------------------------------------------------
 // Keyboard fallback
 // ---------------------------------------------------------------------------
 const keys = {};
-window.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; fromKeys(); });
+window.addEventListener('keydown', (e) => {
+  if (!joined) return;
+  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(e.key)) e.preventDefault();
+  keys[e.key.toLowerCase()] = true; fromKeys();
+});
 window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; fromKeys(); });
 function fromKeys() {
-  // Keyboard is laptop-only; apply directly (phones never fire key events).
-  held.left = !!(keys['arrowleft'] || keys['a']);
-  held.right = !!(keys['arrowright'] || keys['d']);
-  held.brake = !!(keys['arrowdown'] || keys['s'] || keys[' ']);
+  held.left = !!(pointers.left.size || keys['arrowleft'] || keys['a']);
+  held.right = !!(pointers.right.size || keys['arrowright'] || keys['d']);
+  held.brake = !!(pointers.brake.size || keys['arrowdown'] || keys['s'] || keys[' ']);
+  held.throttle = !autoAccelerate && !!(pointers.throttle.size || keys['arrowup'] || keys['w']);
   els.leftBtn.classList.toggle('pressed', held.left);
   els.rightBtn.classList.toggle('pressed', held.right);
   els.brakeBtn.classList.toggle('pressed', held.brake);
+  els.acceleratorBtn.classList.toggle('pressed', held.throttle);
   recompute();
 }
+
+function clearInput() {
+  for (const key of Object.keys(keys)) delete keys[key];
+  for (const touches of Object.values(pointers)) touches.clear();
+  fromKeys();
+  if (joined && socket.connected) socket.emit('ctrl:input', input);
+}
+
+function applySettings(settings) {
+  autoAccelerate = settings?.autoAccelerate !== false;
+  els.controller.classList.toggle('manual', !autoAccelerate);
+  els.acceleratorBtn.classList.toggle('hidden', autoAccelerate);
+  els.autoHint.textContent = autoAccelerate
+    ? 'Auto-accelerating · steer left / right · hold BRAKE to slow / reverse'
+    : 'Manual · hold ACCEL to drive · release to coast · hold BRAKE to slow / reverse';
+  clearInput();
+}
+socket.on('game:settings', applySettings);
+window.addEventListener('blur', clearInput);
+document.addEventListener('visibilitychange', () => { if (document.hidden) clearInput(); });
 
 // ---------------------------------------------------------------------------
 // Send loop
@@ -155,11 +189,15 @@ socket.on('ctrl:feedback', (fb) => {
 
 // A socket event has no user activation, so browsers reject fullscreen there.
 // Present a button; its tap supplies the required gesture.
-socket.on('game:start', showFullscreenPrompt);
-socket.on('game:reset', () => els.fullscreenPrompt.classList.add('hidden'));
+socket.on('game:start', (settings) => { applySettings(settings); showFullscreenPrompt(); });
+socket.on('game:reset', (settings) => {
+  applySettings(settings);
+  els.fullscreenPrompt.classList.add('hidden');
+});
 
-socket.on('host:gone', () => { els.lostBanner.classList.remove('hidden'); joined = false; });
+socket.on('host:gone', () => { els.lostBanner.classList.remove('hidden'); joined = false; clearInput(); });
 socket.on('disconnect', () => {
+  clearInput();
   joinPending = false;
   els.joinBtn.disabled = false;
   els.lostBanner.classList.remove('hidden');
