@@ -114,13 +114,9 @@ export function updateCar(
   );
   const slopePitch = -Math.atan2(aheadInfo.groundY - groundY, 5);
   p.shadowSlopePitch = slopePitch;
-  const accelEst = (p.speed - p.prevSpeed) / Math.max(dt, 1e-3);
   p.prevSpeed = p.speed;
-  const pitch = clamp(
-    slopePitch + clamp(-accelEst * 0.004, -0.05, 0.05),
-    -0.3,
-    0.3,
-  );
+  // Follow the road slope without rocking under acceleration or braking.
+  const pitch = clamp(slopePitch, -0.3, 0.3);
   const bodyRoll = clamp(steer * sp * 0.0016, -0.06, 0.06);
   p.pitch = pitch;
   p.roll = -bodyRoll;
@@ -137,8 +133,14 @@ export function updateCar(
   if (p.skidding && wheels.length >= 4) {
     for (const wi of [2, 3]) {
       wheels[wi].getWorldPosition(skid);
-      dropSkid(skid.x, skid.z, p.heading, p.groundY);
+      dropSkid(
+        p, wi, skid.x, skid.z,
+        p.pos.x - previousX, p.pos.z - previousZ,
+        clamp((lockup ? brake : 0.55) * sp / 32, 0.2, 1),
+      );
     }
+  } else {
+    p.skidContacts = null;
   }
   onGate(p, previousX, previousZ);
 }

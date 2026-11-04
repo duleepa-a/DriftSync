@@ -20,6 +20,7 @@ import {
   updateNitroPickups,
 } from './nitro.js';
 import { createNitroVisuals } from './nitro-visuals.js';
+import { createSkidMarks } from './skid-marks.js';
 import {
   TOTAL_LAPS,
   advanceGates,
@@ -278,6 +279,8 @@ function activePlayers() {
 }
 
 function spawnCars() {
+  clearSmoke();
+  skidMarks.clear();
   G.finishOrder = [];
   G.winnerId = null;
   resetNitroPickups(G.nitroPickups);
@@ -315,6 +318,8 @@ function spawnPlayer(p) {
   p.input = { steer: 0, throttle: 0, brake: 0 };
   p.steerSmooth = 0;
   p.pitch = 0;
+  p.smokeElapsed = null;
+  p.skidContacts = null;
   p.roll = 0;
   p.wheelSpin = 0;
   const ni = G.track.nearestInfo(p.pos, 0);
@@ -433,9 +438,10 @@ function rankings() {
 function placeCamera(p, snap = false, dt = 1 / 60) {
   const pos = p.mesh.position,
     heading = p.mesh.rotation.y;
-  const back = 5.6 + (p.nitroVisual || 0) * 0.6,
-    height = pos.y + 2.5,
-    look = 11;
+  // Tight chase view: keep the bumper in frame while making the car prominent.
+  const back = 4.8 + (p.nitroVisual || 0) * 0.6,
+    height = pos.y + 1.65,
+    look = 3.5;
   const fx = Math.sin(heading),
     fz = Math.cos(heading);
   const tx = pos.x - fx * back,
@@ -462,17 +468,17 @@ function placeCamera(p, snap = false, dt = 1 / 60) {
 
   // Gentle dynamic FOV for a sense of speed (small, so the car stays big).
   const targetFov =
-    60 + Math.min(sp / PHYS.maxSpeed, 1) * 5 + (p.nitroVisual || 0) * 5;
+    58 + Math.min(sp / PHYS.maxSpeed, 1) * 5 + (p.nitroVisual || 0) * 5;
   p.camera.fov +=
     (targetFov - p.camera.fov) * (snap ? 1 : 1 - Math.pow(1 - 0.08, dt * 60));
 
   // Look slightly into the corner (at the car's elevation).
   const rx = Math.cos(heading),
     rz = -Math.sin(heading);
-  const lead = p.renderSteer * 4;
+  const lead = p.renderSteer * 2;
   p.camera.lookAt(
     pos.x + fx * look + rx * lead,
-    pos.y + 1.4,
+    pos.y + 0.2,
     pos.z + fz * look + rz * lead,
   );
 }
@@ -948,6 +954,8 @@ function endRace() {
 }
 
 function backToLobby() {
+  clearSmoke();
+  skidMarks.clear();
   raceEpoch++;
   G.state = 'lobby';
   autoAccelerate.disabled = settingsPending;
@@ -989,7 +997,7 @@ socket.on('host:gone', () => {
 // ---------------------------------------------------------------------------
 const _smokeV = new THREE.Vector3();
 const smokeTex = makeSmokeTexture();
-const SMOKE_MAX = 140;
+const SMOKE_MAX = 280;
 const smokePool = [];
 for (let i = 0; i < SMOKE_MAX; i++) {
   const sp = new THREE.Sprite(
@@ -998,24 +1006,39 @@ for (let i = 0; i < SMOKE_MAX; i++) {
       transparent: true,
       opacity: 0,
       depthWrite: false,
-      color: 0xcccccc,
+      color: 0xd3cfca,
     }),
   );
   sp.visible = false;
   scene.add(sp);
-  smokePool.push({ sp, age: 0, life: 0, vy: 0, base: 1 });
+  smokePool.push({ sp, age: 0, life: 0, vx: 0, vy: 0, vz: 0, base: 1 });
 }
 let smokeIdx = 0;
-function spawnSmoke(x, y, z, scale) {
+function clearSmoke() {
+  for (const p of smokePool) p.sp.visible = false;
+  smokeIdx = 0;
+}
+function spawnSmoke(x, y, z, car, strength, side) {
   const p = smokePool[smokeIdx];
   smokeIdx = (smokeIdx + 1) % SMOKE_MAX;
   p.age = 0;
-  p.life = 0.7 + Math.random() * 0.5;
-  p.vy = 1.2 + Math.random() * 1.4;
-  p.base = scale;
+  p.life = 1.05 + Math.random() * 0.5;
+  const heading = car.mesh.rotation.y;
+  const wake = car.speed * 0.07;
+  const spread = side * (0.3 + Math.random() * 0.45);
+  p.vx = Math.sin(heading) * wake + Math.cos(heading) * spread;
+  p.vz = Math.cos(heading) * wake - Math.sin(heading) * spread;
+  p.vy = 0.25 + Math.random() * 0.35;
+  p.base = 0.65 + Math.random() * 0.3;
+  p.stretch = 1.1 + Math.random() * 0.35;
+  p.density = (0.22 + strength * 0.14) * (0.8 + Math.random() * 0.2);
+  p.phase = Math.random() * Math.PI * 2;
+  p.spin = (Math.random() - 0.5) * 0.5;
   p.sp.visible = true;
   p.sp.position.set(x, y, z);
-  p.sp.scale.setScalar(scale);
+  p.sp.scale.set(p.base * p.stretch, p.base, 1);
+  p.sp.material.opacity = 0;
+  p.sp.material.rotation = p.phase;
 }
 function updateSmoke(dt) {
   for (const p of smokePool) {
@@ -1026,76 +1049,95 @@ function updateSmoke(dt) {
       p.sp.visible = false;
       continue;
     }
-    p.sp.position.y += p.vy * dt;
-    p.sp.scale.setScalar(p.base * (1 + t * 2.4));
-    p.sp.material.opacity = (1 - t) * 0.4;
+    // Lose the tire's momentum, then drift slowly with a shared light breeze.
+    const drag = Math.exp(-dt * 2.2);
+    p.vx *= drag;
+    p.vz *= drag;
+    p.sp.position.x += (p.vx + 0.28 + Math.sin(p.phase + p.age * 2) * 0.15) * dt;
+    p.sp.position.z += (p.vz + 0.12 + Math.cos(p.phase + p.age * 1.7) * 0.15) * dt;
+    p.sp.position.y += p.vy * (1 - t * 0.4) * dt;
+    const size = p.base * (1 + 3.2 * Math.sqrt(t));
+    p.sp.scale.set(size * p.stretch, size, 1);
+    p.sp.material.rotation += p.spin * dt;
+    const fadeIn = THREE.MathUtils.smoothstep(p.age, 0, 0.09);
+    p.sp.material.opacity = p.density * fadeIn * Math.pow(1 - t, 1.6);
   }
 }
-function emitCarSmoke(p) {
-  if (!p.skidding) return;
+function emitCarSmoke(p, dt = 1 / 60) {
+  if (!p.skidding || p.finished) {
+    p.smokeElapsed = null;
+    return;
+  }
   const wheels = p.mesh.userData.wheels || [];
   if (wheels.length < 4) return;
-  for (const wi of [2, 3]) {
-    wheels[wi].getWorldPosition(_smokeV);
-    spawnSmoke(_smokeV.x, _smokeV.y + 0.3, _smokeV.z, 1.9);
+  const strength = THREE.MathUtils.clamp(Math.abs(p.speed) / PHYS.maxSpeed, 0, 1);
+  const interval = 1 / (14 + strength * 8);
+  p.smokeElapsed = p.smokeElapsed == null ? interval : p.smokeElapsed + dt;
+  while (p.smokeElapsed >= interval) {
+    p.smokeElapsed -= interval;
+    for (const wi of [2, 3]) {
+      wheels[wi].getWorldPosition(_smokeV);
+      // Spread emission along the travelled path when a frame spans two puffs.
+      const distance = p.speed * p.smokeElapsed;
+      spawnSmoke(
+        _smokeV.x - Math.sin(p.mesh.rotation.y) * distance,
+        _smokeV.y + 0.08,
+        _smokeV.z - Math.cos(p.mesh.rotation.y) * distance,
+        p,
+        strength,
+        wi === 2 ? -1 : 1,
+      );
+    }
   }
 }
 function makeSmokeTexture() {
   const c = document.createElement('canvas');
-  c.width = c.height = 64;
+  c.width = c.height = 128;
   const ctx = c.getContext('2d');
-  const g = ctx.createRadialGradient(32, 32, 2, 32, 32, 32);
-  g.addColorStop(0, 'rgba(255,255,255,0.9)');
-  g.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 64, 64);
+  // Smooth noise at several scales gives each rotated puff a soft, ragged edge
+  // and internal wisps instead of a uniform circular gradient.
+  const hash = (x, y) => {
+    let n = Math.imul(x, 374761393) + Math.imul(y, 668265263);
+    n = Math.imul(n ^ (n >>> 13), 1274126177);
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967295;
+  };
+  const noise = (x, y) => {
+    const ix = Math.floor(x), iy = Math.floor(y);
+    const fx = x - ix, fy = y - iy;
+    const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+    return THREE.MathUtils.lerp(
+      THREE.MathUtils.lerp(hash(ix, iy), hash(ix + 1, iy), sx),
+      THREE.MathUtils.lerp(hash(ix, iy + 1), hash(ix + 1, iy + 1), sx),
+      sy,
+    );
+  };
+  const pixels = ctx.createImageData(128, 128);
+  for (let y = 0; y < 128; y++) {
+    for (let x = 0; x < 128; x++) {
+      const u = x / 127, v = y / 127;
+      const cloud = noise(u * 5 + 7, v * 5 + 13) * 0.6
+        + noise(u * 11 + 3, v * 11 + 5) * 0.28
+        + noise(u * 23, v * 23) * 0.12;
+      const radius = Math.hypot((u - 0.5) * 2, (v - 0.5) * 2);
+      const edge = 1 - THREE.MathUtils.smoothstep(radius, 0.3, 0.98);
+      const alpha = edge * THREE.MathUtils.smoothstep(cloud, 0.18, 0.78);
+      const at = (y * 128 + x) * 4;
+      const shade = Math.round(220 + cloud * 35);
+      pixels.data[at] = pixels.data[at + 1] = pixels.data[at + 2] = shade;
+      pixels.data[at + 3] = Math.round(alpha * 255);
+    }
+  }
+  ctx.putImageData(pixels, 0, 0);
   return new THREE.CanvasTexture(c);
 }
 
 // ---------------------------------------------------------------------------
-// Skid marks (one InstancedMesh, recycled ring buffer)
+// Skid marks (connected, textured strips in one draw call)
 // ---------------------------------------------------------------------------
-const SKID_MAX = 800;
-const skidMesh = new THREE.InstancedMesh(
-  new THREE.PlaneGeometry(0.55, 1.5),
-  new THREE.MeshBasicMaterial({
-    color: 0x0a0a0a,
-    transparent: true,
-    opacity: 0.5,
-    depthWrite: false,
-    polygonOffset: true,
-    polygonOffsetFactor: -2,
-    polygonOffsetUnits: -2,
-  }),
-  SKID_MAX,
-);
-skidMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-skidMesh.frustumCulled = false;
-skidMesh.renderOrder = 1;
-const _hideM = new THREE.Matrix4().makeScale(0, 0, 0);
-for (let i = 0; i < SKID_MAX; i++) skidMesh.setMatrixAt(i, _hideM);
-skidMesh.instanceMatrix.needsUpdate = true;
+const skidMarks = createSkidMarks(G.track);
+const skidMesh = skidMarks.mesh;
+const dropSkid = skidMarks.emit;
 scene.add(skidMesh);
-
-let skidIdx = 0;
-const _skidFlat = new THREE.Quaternion().setFromEuler(
-  new THREE.Euler(-Math.PI / 2, 0, 0),
-);
-const _skidYaw = new THREE.Quaternion();
-const _skidQ = new THREE.Quaternion();
-const _skidUp = new THREE.Vector3(0, 1, 0);
-const _skidM = new THREE.Matrix4();
-const _skidS = new THREE.Vector3(1, 1, 1);
-const _skidP = new THREE.Vector3();
-function dropSkid(x, z, heading, y) {
-  _skidYaw.setFromAxisAngle(_skidUp, heading);
-  _skidQ.copy(_skidYaw).multiply(_skidFlat);
-  _skidP.set(x, y + 0.04, z);
-  _skidM.compose(_skidP, _skidQ, _skidS);
-  skidMesh.setMatrixAt(skidIdx, _skidM);
-  skidIdx = (skidIdx + 1) % SKID_MAX;
-  skidMesh.instanceMatrix.needsUpdate = true;
-}
 
 // ---------------------------------------------------------------------------
 // Main loop
@@ -1105,6 +1147,7 @@ const MAX_FRAME = 0.1;
 let last = performance.now();
 let accumulated = 0;
 function updateRace(dt) {
+  skidMarks.update(dt);
   accumulated += dt;
   while (accumulated >= SIM_STEP) {
     for (const p of G.players.values()) {
@@ -1137,7 +1180,7 @@ function loop(now) {
     updateRace(dt);
     for (const p of G.players.values()) {
       if (p.finished) continue;
-      emitCarSmoke(p);
+      emitCarSmoke(p, dt);
       audio.setEngine(p.id, p.rpm, PHYS.redline);
       audio.setSqueal(p.id, p.squeal);
       if (p.shiftPulse > 0) {

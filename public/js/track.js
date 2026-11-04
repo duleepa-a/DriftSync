@@ -212,7 +212,7 @@ export function buildTrack(scene) {
     grassMat,
   );
 
-  // F1 dressing: catch fencing, start gantry, grid boxes, pit complex.
+  // F1 dressing: catch fencing and start gantry.
   buildCatchFence(scene, samples, tangents, halfWidth + 0.4);
   buildCatchFence(scene, samples, tangents, -(halfWidth + 0.4));
   const startLights = buildStartGantry(
@@ -222,7 +222,7 @@ export function buildTrack(scene) {
     halfWidth,
   );
 
-  buildLaneDashes(scene, samples, tangents);
+  buildCenterLine(scene, samples, tangents);
   buildStartLine(scene, samples, tangents, halfWidth);
 
   // ---------- Scenery ----------
@@ -249,7 +249,6 @@ export function buildTrack(scene) {
   }
 
   const startPositions = makeStartGrid(samples, tangents, halfWidth);
-  buildGridBoxes(scene, startPositions, tangents[0]);
 
   function nearestInfo(pos, _hint = 0) {
     // Project onto the continuous centerline instead of snapping to a sample.
@@ -576,56 +575,23 @@ function buildStartGantry(scene, start, tangent, halfWidth) {
   return lights;
 }
 
-// Painted starting-grid boxes on the tarmac at each grid slot.
-function buildGridBoxes(scene, startPositions, startTangent) {
-  const tex = makeGridBoxTexture();
-  const geo = new THREE.PlaneGeometry(4.5, 7);
-  const angle = Math.atan2(startTangent.x, startTangent.z);
-  for (const g of startPositions) {
-    const mat = new THREE.MeshStandardMaterial({
-      map: tex,
-      transparent: true,
-      roughness: 0.7,
-      depthWrite: false,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-      polygonOffsetUnits: -1,
-    });
-    const box = new THREE.Mesh(geo, mat);
-    box.rotation.x = -Math.PI / 2;
-    box.rotation.z = -angle;
-    box.position.set(g.pos.x, g.pos.y + 0.05, g.pos.z);
-    scene.add(box);
-  }
-}
-
-function buildLaneDashes(scene, samples, tangents) {
-  const N = samples.length;
-  const dash = new THREE.BoxGeometry(0.5, 0.05, 4);
+function buildCenterLine(scene, samples, tangents) {
   const mat = new THREE.MeshStandardMaterial({
     color: 0xfff4d0,
-    roughness: 0.5,
+    roughness: 0.9,
   });
-  const step = 7;
-  const inst = new THREE.InstancedMesh(dash, mat, Math.floor(N / step) + 1);
-  const m = new THREE.Matrix4(),
-    q = new THREE.Quaternion(),
-    up = new THREE.Vector3(0, 1, 0);
-  let count = 0;
-  for (let i = 0; i < N; i += step) {
-    if (i === 0) continue; // Keep the centre dash out of the checker strip.
-    const t = tangents[i];
-    q.setFromAxisAngle(up, Math.atan2(t.x, t.z));
-    m.compose(
-      new THREE.Vector3(samples[i].x, samples[i].y + 0.07, samples[i].z),
-      q,
-      new THREE.Vector3(1, 1, 1),
-    );
-    inst.setMatrixAt(count++, m);
-  }
-  inst.count = count;
-  inst.instanceMatrix.needsUpdate = true;
-  scene.add(inst);
+  // A 20 cm painted stripe follows the road, below the checker strip.
+  const line = buildRibbon(
+    scene,
+    samples,
+    tangents,
+    -0.05,
+    0.05,
+    0.025,
+    mat,
+    1 / samples.length,
+  );
+  line.name = 'road-center-line';
 }
 
 function buildStartLine(scene, samples, tangents, halfWidth) {
@@ -722,7 +688,8 @@ function makeStartGrid(samples, tangents, halfWidth) {
     n = sideNormal(t);
   const heading = Math.atan2(t.x, t.z);
   const lanes = [-halfWidth * 0.4, halfWidth * 0.4];
-  const rows = [-8, -20];
+  // Leave enough distance to see the overhead lights from the chase camera.
+  const rows = [-24, -36];
   const out = [];
   for (let r = 0; r < 2; r++) {
     for (let l = 0; l < 2; l++) {
@@ -825,28 +792,6 @@ function makeGrassMat() {
     roughness: 1,
     metalness: 0,
   });
-}
-
-// Starting-grid box: white border + a forward arrow, transparent centre.
-function makeGridBoxTexture() {
-  const c = document.createElement('canvas');
-  c.width = c.height = 128;
-  const ctx = c.getContext('2d');
-  ctx.clearRect(0, 0, 128, 128);
-  ctx.strokeStyle = '#f4f4f4';
-  ctx.lineWidth = 8;
-  ctx.strokeRect(8, 8, 112, 112);
-  ctx.fillStyle = '#f4f4f4';
-  ctx.fillRect(58, 70, 12, 36); // arrow stem
-  ctx.beginPath();
-  ctx.moveTo(64, 40);
-  ctx.lineTo(46, 72);
-  ctx.lineTo(82, 72);
-  ctx.closePath();
-  ctx.fill();
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
 }
 
 // Transparent wire-grid texture for the catch fence.

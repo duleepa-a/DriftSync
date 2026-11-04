@@ -487,9 +487,7 @@ try {
       p.speed = p.prevSpeed = 35;
       p.input.brake = 1;
       updateRace(1 / 60);
-      const skidMatrix = new THREE.Matrix4();
-      skidMesh.getMatrixAt(0, skidMatrix);
-      if (Math.abs(skidMatrix.determinant()) < 0.001) throw new Error('Braking McLaren left no tire mark');
+      if (skidMesh.geometry.drawRange.count < 12) throw new Error('Braking McLaren left no tire mark');
       emitCarSmoke(p); updateSmoke(1 / 60);
       const visibleSmoke = smokePool.filter(item => item.sp.visible && item.sp.material.opacity > 0);
       if (visibleSmoke.length < 2) throw new Error('Braking McLaren emitted no tire smoke');
@@ -498,10 +496,24 @@ try {
         const wheelPosition = rearWheels[wi].getWorldPosition(new THREE.Vector3());
         if (visibleSmoke[wi].sp.position.distanceTo(wheelPosition) > 0.5) throw new Error('Tire smoke is not placed at the rear wheels');
       }
+      for (let frame = 0; frame < 24; frame++) {
+        updateRace(1 / 60); emitCarSmoke(p, 1 / 60); updateSmoke(1 / 60);
+      }
       renderSplit(); inspectFrame('1 player braking with skid marks and smoke', 1);
       smokeScreenshot = renderer.domElement.toDataURL('image/png');
-      visibleSmoke.forEach(item => { item.sp.visible = false; });
+      const plume = smokePool.filter(item => item.sp.visible);
+      if (plume.length < 6 || !plume.some(item => item.sp.scale.y > 1.5)) throw new Error('Smoke failed to form an expanding trail');
+      updateSmoke(2);
+      if (smokePool.some(item => item.sp.visible)) throw new Error('Smoke failed to dissipate');
+      const emissionCounts = [];
+      for (const hz of [30, 120]) {
+        spawnCars(); p.speed = 35; p.skidding = true;
+        for (let frame = 0; frame < hz; frame++) emitCarSmoke(p, 1 / hz);
+        emissionCounts.push(smokePool.filter(item => item.sp.visible).length);
+      }
+      if (Math.abs(emissionCounts[0] - emissionCounts[1]) > 2) throw new Error('Smoke density depends on frame rate');
       spawnCars();
+      if (smokePool.some(item => item.sp.visible)) throw new Error('Restart retained tire smoke');
       p.speed = p.prevSpeed = 40;
       p.steerSmooth = 1;
       p.input.steer = 1;
