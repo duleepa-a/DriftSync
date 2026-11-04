@@ -44,7 +44,7 @@ const physicsSource = readFileSync(
     `from '${pathToFileURL(resolve(root, 'node_modules/three/build/three.module.js'))}'`,
   )
   .replace("from './nitro.js'", `from ${JSON.stringify(nitroUrl)}`);
-const { updateCar } = await import(
+const { updateCar, resetHandling } = await import(
   `data:text/javascript,${encodeURIComponent(physicsSource)}`
 );
 const motionSource = readFileSync(resolve(root, 'public/js/motion.js'), 'utf8');
@@ -207,6 +207,87 @@ test('road height changes continuously between samples, including the lap seam',
       );
       assert.ok(info.dist < 1e-8);
     }
+  }
+});
+
+test('wheel contact height matches the rendered road triangles around bends', () => {
+  mockSceneryDocument();
+  const scene = new THREE.Scene(), track = buildTrack(scene);
+  const road = scene.getObjectByName('asphalt-road').geometry;
+  const vertices = road.attributes.position;
+  scene.updateMatrixWorld(true);
+  const ray = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
+  for (let segment = 2; segment < track.samples.length - 1; segment++) {
+    for (let triangle = 0; triangle < 2; triangle++) {
+      const point = new THREE.Vector3();
+      for (let corner = 0; corner < 3; corner++) {
+        const index = road.index.getX(segment * 6 + triangle * 3 + corner);
+        point.addScaledVector(new THREE.Vector3().fromBufferAttribute(vertices, index), [0.2, 0.4, 0.4][corner]);
+      }
+      const surface = track.surfaceInfo(point, segment);
+      for (const hint of [segment - 3, segment + 3, 0]) {
+        assert.equal(track.surfaceInfo(point, hint).groundY, surface.groundY,
+          'changing the nearest segment must not change the road height');
+      }
+      ray.ray.origin.set(point.x, 100, point.z);
+      const visibleHeight = ray.intersectObject(scene.getObjectByName('asphalt-road'))[0].point.y;
+      // Tight inside bends can overlap; use the top visible triangle. Kerbs
+      // are an additional 5 cm above this asphalt mesh.
+      assert.ok(surface.groundY >= visibleHeight - 1e-6 && surface.groundY <= visibleHeight + 0.050001,
+        JSON.stringify({ segment, triangle, expected: visibleHeight, actual: surface.groundY }));
+      assert.ok(surface.normalY > 0.9);
+    }
+  }
+});
+
+test('uphill vehicle height follows the surface immediately at racing speed', () => {
+  const track = { halfWidth: 100, nearestInfo: p => ({ index: 0, offset: 0, groundY: p.z * 0.15 }) };
+  const p = { input: { steer: 0 }, steerSmooth: 0, speed: 46, heading: 0,
+    groundY: 0, pos: new THREE.Vector3(), mesh: new THREE.Group() };
+  for (let frame = 0; frame < 60; frame++) {
+    updateCar(p, 1 / 60, track, { dropSkid() {}, onGate() {} });
+    assert.ok(Math.abs(p.groundY - track.nearestInfo(p.pos).groundY) < 1e-9);
+  }
+});
+
+test('chassis suspension smooths a crest without accumulating uphill lag', () => {
+  const height = z => z < 20 ? z * 0.15 : 3 - (z - 20) * 0.1;
+  const track = { surfaceInfo({ z }) {
+    const slope = z < 20 ? 0.15 : -0.1, length = Math.hypot(1, slope);
+    return { groundY: height(z), normalX: 0, normalY: 1 / length, normalZ: -slope / length };
+  } };
+  const results = [];
+  for (const hz of [30, 60, 120]) {
+    const p = { pos: new THREE.Vector3(0, 0, -20), mesh: new THREE.Group(), groundY: -3,
+      heading: 0, pitch: 0, roll: 0, steerSmooth: 0, wheelSpin: 0 };
+    p.mesh.rotation.order = 'YXZ';
+    resetMotion(p);
+    renderCar(p, 1, track, 1 / hz);
+    let lastHeight = p.mesh.position.y, lastPitch = p.mesh.rotation.x;
+    let lastVelocity = 0, maxAcceleration = 0, maxPitchRate = 0;
+    for (let frame = 0; frame < hz * 2; frame++) {
+      savePreviousPose(p);
+      p.pos.z += 46 / hz;
+      p.groundY = height(p.pos.z);
+      renderCar(p, 1, track, 1 / hz);
+      const velocity = (p.mesh.position.y - lastHeight) * hz;
+      if (p.pos.z > 12 && p.pos.z < 30) {
+        maxAcceleration = Math.max(maxAcceleration, Math.abs(velocity - lastVelocity) * hz);
+        maxPitchRate = Math.max(maxPitchRate, Math.abs(p.mesh.rotation.x - lastPitch) * hz);
+      }
+      if (p.pos.z > 8 && p.pos.z < 16) {
+        assert.ok(Math.abs(p.mesh.position.y - height(p.pos.z) - 0.015) < 0.06,
+          'body must catch up on a steady grade');
+      }
+      lastHeight = p.mesh.position.y; lastPitch = p.mesh.rotation.x; lastVelocity = velocity;
+    }
+    assert.ok(maxAcceleration < 180, 'crest must not snap vertical velocity: ' + maxAcceleration);
+    assert.ok(maxPitchRate < 1.5, 'crest pitch must ease over time: ' + maxPitchRate);
+    results.push({ y: p.mesh.position.y, pitch: p.mesh.rotation.x });
+  }
+  for (const result of results.slice(1)) {
+    assert.ok(Math.abs(result.y - results[0].y) < 0.015);
+    assert.ok(Math.abs(result.pitch - results[0].pitch) < 0.005);
   }
 });
 
@@ -443,6 +524,7 @@ test('turning alone leaves no tire marks; hard braking and wall impact leave two
   p.speed = p.prevSpeed = 35;
   p.pos.set(8.4, 0, 0);
   p.heading = Math.PI / 2;
+  resetHandling(p);
   updateCar(p, 1 / 60, track, hooks);
   assert.equal(p.offTrack, true);
   assert.equal(p.skidding, true);

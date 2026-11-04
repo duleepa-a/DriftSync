@@ -136,7 +136,12 @@ export function createCarMesh(colorHex) {
 
   outer.add(model);
   outer.userData.wheels = ['wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr'].map(
-    (name) => model.getObjectByName(name),
+    (name) => {
+      const wheel = model.getObjectByName(name);
+      // Bind after cloning so each player animates their own wheel meshes.
+      wheel.userData.spin = wheel.getObjectByName('wheel-spin');
+      return wheel;
+    },
   );
   outer.userData.brakeMaterials = brakeMaterials;
   outer.userData.ownedMaterials = ownedMaterials;
@@ -247,10 +252,17 @@ function createFallbackCar(colorHex) {
     [1.05, -1.4],
   ]) {
     const w = new THREE.Group();
+    const spin = new THREE.Group();
+    spin.name = 'wheel-spin';
     const tire = new THREE.Mesh(wheelGeo, wheelMat);
     tire.rotation.z = Math.PI / 2;
     tire.castShadow = true;
-    w.add(tire);
+    spin.add(tire);
+    w.add(spin);
+    w.userData.spin = spin;
+    w.userData.radius = 0.55;
+    w.userData.halfWidth = 0.25;
+    w.userData.restY = 0.55;
     w.position.set(x, 0.55, z);
     w.rotation.order = 'YXZ';
     car.add(w);

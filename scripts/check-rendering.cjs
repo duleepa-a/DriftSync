@@ -93,6 +93,8 @@ app.post('/render-result', express.json({ limit: '32mb' }), (req, res) => {
     'brakeReverseScreenshot',
     'sceneryScreenshot',
     'smokeScreenshot',
+    'driftScreenshot',
+    'groundingScreenshot',
     'exhaustScreenshot',
     'shadowOffScreenshot',
   ]) {
@@ -212,7 +214,7 @@ app.get('/js/host.js', (_req, res) => {
     fs
       .readFileSync(path.join(root, 'public/js/host.js'), 'utf8')
       .replaceAll('requestAnimationFrame(loop);', '') +
-    '\nexport { G, scene, renderer, composer, renderPass, bloomPass, colorGradePass, addPlayer, removePlayer, backToLobby, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera, emitCarSmoke, updateSmoke, smokePool, skidMesh };';
+    '\nexport { G, scene, renderer, composer, renderPass, bloomPass, colorGradePass, addPlayer, removePlayer, backToLobby, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, updateCountdown, placeCamera, emitCarSmoke, updateSmoke, smokePool, skidMesh };';
   res.type('js').send(source);
 });
 app.get('/profile-car.mjs', (_req, res) =>
@@ -223,8 +225,9 @@ app.get('/profile-forest.mjs', (_req, res) =>
 );
 app.get('/render-check.mjs', (_req, res) =>
   res.type('js').send(`
-import { G, scene, renderer, composer, renderPass, bloomPass, colorGradePass, addPlayer, removePlayer, backToLobby, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, placeCamera, emitCarSmoke, updateSmoke, smokePool, skidMesh } from '/js/host.js';
+import { G, scene, renderer, composer, renderPass, bloomPass, colorGradePass, addPlayer, removePlayer, backToLobby, spawnCars, renderSplit, renderOverview, layoutHud, updateRace, updateCountdown, placeCamera, emitCarSmoke, updateSmoke, smokePool, skidMesh } from '/js/host.js';
 import { resetMotion, renderCar } from '/js/motion.js';
+import { resetHandling } from '/js/physics.js';
 import { updateCarEffects } from '/js/car-effects.js';
 import * as THREE from 'three';
 const report = document.createElement('pre');
@@ -232,7 +235,7 @@ report.id = 'render-result';
 document.body.appendChild(report);
 const cases = [];
 const motion = [];
-let screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, smokeScreenshot, exhaustScreenshot, shadowOffScreenshot, carShadow, nitro, bloom;
+let screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, smokeScreenshot, driftScreenshot, groundingScreenshot, exhaustScreenshot, shadowOffScreenshot, carShadow, nitro, bloom;
 let shaderError;
 renderer.debug.onShaderError = (gl, program, vertex, fragment) => {
   shaderError = [gl.getProgramInfoLog(program), gl.getShaderInfoLog(vertex), gl.getShaderInfoLog(fragment)].join('\\n');
@@ -310,7 +313,7 @@ async function checkFinishing() {
     p.pos.copy(gate.pos).addScaledVector(gate.tangent, -0.1);
     p.heading = Math.atan2(gate.tangent.x, gate.tangent.z);
     p.speed = p.prevSpeed = 20;
-    resetMotion(p); renderCar(p, 1); placeCamera(p, true);
+    resetHandling(p); resetMotion(p); renderCar(p, 1); placeCamera(p, true);
     updateRace(1 / 60); renderSplit();
     if (!p.finished) throw new Error('Final gate crossing did not finish the player');
   }
@@ -405,6 +408,10 @@ try {
     for (const player of G.players.values()) {
       if (player.mesh.userData.modelId !== 'mclaren-2021') throw new Error('McLaren asset failed to load; procedural fallback is active');
       if (player.mesh.userData.wheels.length !== 4 || player.mesh.userData.wheels.some(wheel => !wheel)) throw new Error('McLaren wheel contact points are missing');
+      for (const wheel of player.mesh.userData.wheels) {
+        const spin = wheel.userData.spin;
+        if (!spin || spin.parent !== wheel || !spin.getObjectByName('tire-and-rim')?.isMesh) throw new Error('Wheel animation is not bound to visible geometry');
+      }
       player.mesh.traverse(object => {
         if (object.isMesh && object.material.transmission > 0) throw new Error('Car glass re-enabled an extra scene transmission pass');
       });
@@ -521,6 +528,43 @@ try {
       emitCarSmoke(p);
       if (p.skidding || smokePool.some(item => item.sp.visible)) throw new Error('Turning alone emitted tire smoke');
       spawnCars();
+      p.speed = p.prevSpeed = 40;
+      p.input = { steer: 1, brake: 1, throttle: 0 }; p.steerSmooth = 1;
+      for (let frame = 0; frame < 36; frame++) {
+        updateRace(1 / 60); emitCarSmoke(p, 1 / 60); updateSmoke(1 / 60);
+      }
+      if (Math.abs(p.heading - p.travelHeading) < 0.2 || !p.skidding) throw new Error('Brake turn did not produce a drift');
+      if (Math.abs(p.mesh.rotation.y - p.cameraHeading) < 0.2) throw new Error('Camera followed the drift body too closely');
+      renderSplit(); inspectFrame('brake drift with stable chase camera', 1);
+      driftScreenshot = renderer.domElement.toDataURL('image/png');
+      spawnCars();
+      if (p.drift !== 0 || p.travelHeading !== p.heading || p.cameraHeading !== p.heading) throw new Error('Restart retained drift or camera state');
+      let hill = 0, steepness = 0;
+      G.track.samples.forEach((point, index) => {
+        const next = G.track.samples[(index + 1) % G.track.samples.length];
+        const slope = Math.abs(next.y - point.y) / point.distanceTo(next);
+        if (slope > steepness) { steepness = slope; hill = index; }
+      });
+      const tangent = G.track.tangents[hill];
+      p.pos.copy(G.track.samples[hill]);
+      p.pos.x += tangent.z * 10; p.pos.z -= tangent.x * 10;
+      p.heading = Math.atan2(tangent.x, tangent.z) + 0.6;
+      p.sampleIndex = hill; p.groundY = p.pos.y - 0.5;
+      p.roll = -0.06; p.steerSmooth = 0.8; p.wheelSpin = 2.4;
+      resetHandling(p); resetMotion(p); renderCar(p, 1, G.track); placeCamera(p, true);
+      p.mesh.updateMatrixWorld(true);
+      for (const wheel of p.mesh.userData.wheels) {
+        const tire = wheel.getObjectByName('tire-and-rim');
+        const vertices = tire.geometry.attributes.position;
+        const point = new THREE.Vector3();
+        for (let index = 0; index < vertices.count; index += 80) {
+          point.fromBufferAttribute(vertices, index).applyMatrix4(tire.matrixWorld);
+          if (point.y < G.track.surfaceInfo(point, hill).groundY - 0.02) throw new Error('Tire penetrated uphill road while steering');
+        }
+      }
+      renderSplit(); inspectFrame('steering wheels grounded on steep road', 1);
+      groundingScreenshot = renderer.domElement.toDataURL('image/png');
+      spawnCars();
     }
     if (count === 2) {
       screenshot = renderer.domElement.toDataURL('image/png');
@@ -549,6 +593,30 @@ try {
       window.dispatchEvent(new Event('resize')); renderSplit();
 
       const players = [...G.players.values()];
+      const previousState = G.state;
+      spawnCars(); G.state = 'countdown';
+      const gridPositions = players.map(p => p.pos.clone());
+      updateCountdown(1 / 60);
+      if (smokePool.some(item => item.sp.visible)) throw new Error('Countdown emitted smoke without accelerator input');
+      players[0].input.throttle = 1;
+      updateCountdown(1 / 60);
+      const launchSmoke = smokePool.filter(item => item.sp.visible);
+      if (launchSmoke.length !== 2) throw new Error('Countdown accelerator must emit from both rear tires of only that player');
+      for (const puff of launchSmoke) {
+        if (puff.sp.position.distanceTo(players[0].mesh.position) > 4) throw new Error('Countdown smoke came from the wrong car');
+      }
+      for (let frame = 0; frame < 30; frame++) updateCountdown(1 / 60);
+      players.forEach((p, i) => {
+        if (p.speed !== 0 || p.pos.distanceTo(gridPositions[i]) > 1e-9 || p.skidding) throw new Error('Countdown smoke moved the car or enabled driving physics');
+      });
+      renderSplit(); inspectFrame('countdown accelerator tire smoke', 2);
+      players[0].input.throttle = 0;
+      for (let frame = 0; frame < 120; frame++) updateCountdown(1 / 60);
+      if (smokePool.some(item => item.sp.visible)) throw new Error('Released accelerator retained countdown smoke');
+      players[0].input.throttle = 1; G.state = 'racing';
+      emitCarSmoke(players[0]);
+      if (smokePool.some(item => item.sp.visible)) throw new Error('Countdown burnout emission continued after green');
+      G.state = previousState; spawnCars();
       // Approach separate bottles on the back straight using real physics.
       const bottles = [G.nitroPickups[3], G.nitroPickups[5]];
       if (bottles.some(p => !p)) throw new Error('Missing straight-section nitro stations');
@@ -558,7 +626,7 @@ try {
         p.pos.set(bottle.pos.x - Math.sin(p.heading) * 12, 0, bottle.pos.z - Math.cos(p.heading) * 12);
         p.groundY = G.track.nearestInfo(p.pos).groundY;
         p.speed = p.prevSpeed = 46;
-        resetMotion(p); renderCar(p, 1); placeCamera(p, true);
+        resetHandling(p); resetMotion(p); renderCar(p, 1); placeCamera(p, true);
       });
       renderSplit();
       inspectFrame('2 players approaching nitro', 2);
@@ -612,7 +680,7 @@ try {
   const stands = scene.getObjectByName('track-scenery').children.filter(child => child.isLOD);
   const scenery = { trees: forest.count, forestTriangles: forest.count * forest.geometry.index.count / 3, treeAtlasLoaded: forest.userData.textureReady, nearTreeCandidates: forest.userData.nearCandidates.length, nearTreeLimit: 8, nearTreeMaterials: sceneryRoot.userData.forestDetails.meshes.length, grandstands: stands.length };
   const finishing = await checkFinishing();
-  report.textContent = JSON.stringify({ devicePixelRatio, lobbyScreenshotPath, motion, nitro, bloom, carShadow, scenery, finishing, cases, screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, smokeScreenshot, exhaustScreenshot, shadowOffScreenshot });
+  report.textContent = JSON.stringify({ devicePixelRatio, lobbyScreenshotPath, motion, nitro, bloom, carShadow, scenery, finishing, cases, screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, smokeScreenshot, driftScreenshot, groundingScreenshot, exhaustScreenshot, shadowOffScreenshot });
 } catch (error) { report.textContent = JSON.stringify({ error: error.stack }); }
 await fetch('/render-result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: report.textContent });
 `),
