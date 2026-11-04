@@ -5,7 +5,7 @@ export const PHYS = {
   maxSpeed: 46,
   accel: 26,
   dragK: 0.004,
-  coastDecel: 3,
+  coastDecel: 0.89408, // 2 mph per second, expressed in m/s².
   brakeDecel: 55,
   reverseAccel: 16,
   reverseMax: -12,
@@ -42,8 +42,8 @@ export function updateCar(
     if (p.speed > 0.2) p.speed -= PHYS.brakeDecel * brake * dt;
     else p.speed -= PHYS.reverseAccel * brake * dt;
   } else if (throttle <= 0.02) {
-    // Coasting slows both forward and reverse motion without crossing zero.
-    const decel = (PHYS.coastDecel + PHYS.dragK * p.speed * p.speed) * dt;
+    // Released accelerator: a steady 2 mph/s loss, without crossing zero.
+    const decel = PHYS.coastDecel * dt;
     p.speed = Math.sign(p.speed) * Math.max(0, Math.abs(p.speed) - decel);
   } else if (p.speed <= speedLimit) {
     const drag = PHYS.dragK * p.speed * Math.abs(p.speed);
@@ -114,13 +114,9 @@ export function updateCar(
   );
   const slopePitch = -Math.atan2(aheadInfo.groundY - groundY, 5);
   p.shadowSlopePitch = slopePitch;
-  const accelEst = (p.speed - p.prevSpeed) / Math.max(dt, 1e-3);
   p.prevSpeed = p.speed;
-  const pitch = clamp(
-    slopePitch + clamp(-accelEst * 0.004, -0.05, 0.05),
-    -0.3,
-    0.3,
-  );
+  // Follow the road slope without rocking under acceleration or braking.
+  const pitch = clamp(slopePitch, -0.3, 0.3);
   const bodyRoll = clamp(steer * sp * 0.0016, -0.06, 0.06);
   p.pitch = pitch;
   p.roll = -bodyRoll;
@@ -137,8 +133,14 @@ export function updateCar(
   if (p.skidding && wheels.length >= 4) {
     for (const wi of [2, 3]) {
       wheels[wi].getWorldPosition(skid);
-      dropSkid(skid.x, skid.z, p.heading, p.groundY);
+      dropSkid(
+        p, wi, skid.x, skid.z,
+        p.pos.x - previousX, p.pos.z - previousZ,
+        clamp((lockup ? brake : 0.55) * sp / 32, 0.2, 1),
+      );
     }
+  } else {
+    p.skidContacts = null;
   }
   onGate(p, previousX, previousZ);
 }
