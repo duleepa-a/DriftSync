@@ -5,7 +5,7 @@ export const PHYS = {
   maxSpeed: 46,
   accel: 26,
   dragK: 0.004,
-  coastDecel: 3,
+  coastDecel: 0.89408, // 2 mph per second, expressed in m/s².
   brakeDecel: 55,
   reverseAccel: 16,
   reverseMax: -12,
@@ -42,8 +42,8 @@ export function updateCar(
     if (p.speed > 0.2) p.speed -= PHYS.brakeDecel * brake * dt;
     else p.speed -= PHYS.reverseAccel * brake * dt;
   } else if (throttle <= 0.02) {
-    // Coasting slows both forward and reverse motion without crossing zero.
-    const decel = (PHYS.coastDecel + PHYS.dragK * p.speed * p.speed) * dt;
+    // Released accelerator: a steady 2 mph/s loss, without crossing zero.
+    const decel = PHYS.coastDecel * dt;
     p.speed = Math.sign(p.speed) * Math.max(0, Math.abs(p.speed) - decel);
   } else if (p.speed <= speedLimit) {
     const drag = PHYS.dragK * p.speed * Math.abs(p.speed);

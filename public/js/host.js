@@ -478,7 +478,7 @@ function placeCamera(p, snap = false, dt = 1 / 60) {
   const lead = p.renderSteer * 2;
   p.camera.lookAt(
     pos.x + fx * look + rx * lead,
-    pos.y + 0.2,
+    pos.y + 0.45,
     pos.z + fz * look + rz * lead,
   );
 }

@@ -84,6 +84,20 @@ test('braking cancels nitro immediately and preserves reverse control', () => {
   assert.equal(p.speed, PHYS.reverseMax);
 });
 
+test('manual accelerator release loses 2 mph per second at different speeds and frame rates', () => {
+  for (const mph of [15, 60, 120, -20]) {
+    for (const hz of [30, 60, 120]) {
+      const p = player();
+      p.speed = p.prevSpeed = mph * 0.44704;
+      for (let frame = 0; frame < hz; frame++) {
+        updateCar(p, 1 / hz, flatTrack, { ...hooks, autoAccelerate: false });
+      }
+      const expected = Math.sign(mph) * (Math.abs(mph) - 2);
+      assert.ok(Math.abs(p.speed / 0.44704 - expected) < 1e-9);
+    }
+  }
+});
+
 test('swept collection catches fast crossings and awards each shared bottle only once', () => {
   const later = player(0),
     earlier = player(1);
