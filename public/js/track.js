@@ -299,6 +299,69 @@ export function buildTrack(scene) {
     };
   }
 
+  // Tire contact must use the rendered road triangles, especially near the
+  // inside/outside of bends where centreline height interpolation differs.
+  const roadVertices = road.geometry.getAttribute('position');
+  const roadIndices = road.geometry.getIndex();
+  const surfaceCells = new Map();
+  const cellSize = 16;
+  for (let segment = 0; segment < samples.length; segment++) {
+    let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+    for (let corner = 0; corner < 6; corner++) {
+      const index = roadIndices.getX(segment * 6 + corner);
+      const x = roadVertices.getX(index), z = roadVertices.getZ(index);
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+      minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+    }
+    for (let x = Math.floor(minX / cellSize); x <= Math.floor(maxX / cellSize); x++) {
+      for (let z = Math.floor(minZ / cellSize); z <= Math.floor(maxZ / cellSize); z++) {
+        const key = x + ',' + z;
+        if (!surfaceCells.has(key)) surfaceCells.set(key, []);
+        surfaceCells.get(key).push(segment);
+      }
+    }
+  }
+  function surfaceInfo(pos, hint = 0) {
+    function sample(segment) {
+      let highest;
+      for (let face = 0; face < 2; face++) {
+        const offset = segment * 6 + face * 3;
+        const a = roadIndices.getX(offset), b = roadIndices.getX(offset + 1), c = roadIndices.getX(offset + 2);
+        const ax = roadVertices.getX(a), az = roadVertices.getZ(a), ay = roadVertices.getY(a);
+        const bx = roadVertices.getX(b) - ax, bz = roadVertices.getZ(b) - az, by = roadVertices.getY(b) - ay;
+        const cx = roadVertices.getX(c) - ax, cz = roadVertices.getZ(c) - az, cy = roadVertices.getY(c) - ay;
+        const det = bx * cz - bz * cx;
+        const x = pos.x - ax, z = pos.z - az;
+        const u = (x * cz - z * cx) / det;
+        const v = (bx * z - bz * x) / det;
+        if (u < -1e-6 || v < -1e-6 || u + v > 1 + 1e-6) continue;
+        const nx = by * cz - bz * cy, ny = bz * cx - bx * cz, nz = bx * cy - by * cx;
+        if (ny <= 1e-8) continue; // Folded back faces are not rendered as road.
+        const length = Math.hypot(nx, ny, nz);
+        const across = (a % 2) * (1 - u - v) + (b % 2) * u + (c % 2) * v;
+        const kerb = Math.abs(across - 0.5) > 0.5 - 1.6 / (halfWidth * 2);
+        // The kerbs and checker paint sit above the asphalt ribbon.
+        const checker = segment === 0 || segment === samples.length - 1;
+        const hit = { groundY: ay + by * u + cy * v + (kerb ? 0.05 : checker ? 0.035 : 0),
+          normalX: nx / length, normalY: ny / length, normalZ: nz / length };
+        if (!highest || hit.groundY > highest.groundY) highest = hit;
+      }
+      return highest;
+    }
+    // Query every overlapping segment at this position. A changing physics
+    // hint must never select a different height on a folded inside bend.
+    const key = Math.floor(pos.x / cellSize) + ',' + Math.floor(pos.z / cellSize);
+    let highest;
+    for (const segment of surfaceCells.get(key) || []) {
+      const hit = sample(segment);
+      if (hit && (!highest || hit.groundY > highest.groundY)) highest = hit;
+    }
+    if (highest) return highest;
+    const nearest = nearestInfo(pos, hint);
+    return { groundY: nearest.groundY + 0.01,
+      normalX: 0, normalY: 1, normalZ: 0 };
+  }
+
   return {
     samples,
     tangents,
@@ -306,6 +369,7 @@ export function buildTrack(scene) {
     gates,
     startPositions,
     nearestInfo,
+    surfaceInfo,
     startLights,
     sun,
     sunHelper,

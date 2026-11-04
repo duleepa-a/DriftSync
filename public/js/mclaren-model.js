@@ -53,13 +53,18 @@ export function prepareMclaren(source) {
     car.add(copy);
     batch.geometries.forEach((item) => item.dispose());
   }
-  // Keep the tire mesh batched, but expose its four actual wheel centers to
-  // physics, skid marks and smoke. Empty pivots add no rendering draw calls.
+  // Separate the four wheel assemblies from the static material batches.
+  // Steering rotates the mount; tire/rim rolling rotates its axle child.
   const tire = car.children.find((mesh) =>
     mesh.material.name.includes('_Wheel1A_'),
   );
   if (!tire) throw new Error('McLaren tire geometry is missing');
   const positions = tire.geometry.getAttribute('position');
+  const calipers = car.children.find((mesh) =>
+    mesh.material.name.includes('_Callipers'),
+  );
+  const tireParts = splitWheelGeometry(tire.geometry);
+  const caliperParts = calipers ? splitWheelGeometry(calipers.geometry) : [];
   const wheelBounds = Array.from({ length: 4 }, () => new THREE.Box3());
   const vertex = new THREE.Vector3();
   for (let i = 0; i < positions.count; i++) {
@@ -74,9 +79,74 @@ export function prepareMclaren(source) {
     pivot.name = name;
     wheelBounds[index].getCenter(pivot.position);
     pivot.rotation.order = 'YXZ';
+    const size = wheelBounds[index].getSize(new THREE.Vector3());
+    pivot.userData.radius = (size.y + size.z) / 4;
+    pivot.userData.halfWidth = size.x / 2;
+    pivot.userData.restY = pivot.position.y;
+    // Bound the rolling tire at every spin angle, not just its authored pose.
+    const tirePosition = tireParts[index].getAttribute('position');
+    for (let i = 0; i < tirePosition.count; i++) {
+      pivot.userData.radius = Math.max(pivot.userData.radius, Math.hypot(
+        tirePosition.getY(i) - pivot.position.y,
+        tirePosition.getZ(i) - pivot.position.z,
+      ));
+    }
+    const spin = new THREE.Group();
+    spin.name = 'wheel-spin';
+    pivot.add(spin);
+    for (const [geometry, material, parent] of [
+      [tireParts[index], tire.material, spin],
+      [caliperParts[index], calipers?.material, pivot],
+    ]) {
+      if (!geometry) continue;
+      geometry.translate(-pivot.position.x, -pivot.position.y, -pivot.position.z);
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.name = parent === spin ? 'tire-and-rim' : 'brake-caliper';
+      mesh.castShadow = mesh.receiveShadow = true;
+      parent.add(mesh);
+    }
     car.add(pivot);
   });
+  car.remove(tire);
+  tire.geometry.dispose();
+  if (calipers) {
+    car.remove(calipers);
+    calipers.geometry.dispose();
+  }
   return car;
+}
+
+function splitWheelGeometry(geometry) {
+  const position = geometry.getAttribute('position');
+  const sourceIndex = geometry.index.array;
+  const groups = Array.from({ length: 4 }, () => []);
+  for (let i = 0; i < sourceIndex.length; i += 3) {
+    const a = sourceIndex[i], b = sourceIndex[i + 1], c = sourceIndex[i + 2];
+    const x = position.getX(a) + position.getX(b) + position.getX(c);
+    const z = position.getZ(a) + position.getZ(b) + position.getZ(c);
+    groups[(z < 0 ? 2 : 0) + (x > 0 ? 1 : 0)].push(a, b, c);
+  }
+  return groups.map((indices) => {
+    if (!indices.length) return null;
+    const vertices = [], lookup = new Map();
+    const remapped = indices.map((index) => {
+      if (!lookup.has(index)) { lookup.set(index, vertices.length); vertices.push(index); }
+      return lookup.get(index);
+    });
+    const part = new THREE.BufferGeometry();
+    for (const [name, attribute] of Object.entries(geometry.attributes)) {
+      const { itemSize, array, normalized } = attribute;
+      const data = new array.constructor(vertices.length * itemSize);
+      vertices.forEach((index, vertex) => {
+        for (let component = 0; component < itemSize; component++) {
+          data[vertex * itemSize + component] = array[index * itemSize + component];
+        }
+      });
+      part.setAttribute(name, new THREE.BufferAttribute(data, itemSize, normalized));
+    }
+    part.setIndex(remapped);
+    return part;
+  });
 }
 
 function mergeGeometries(geometries) {

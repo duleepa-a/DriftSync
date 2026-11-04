@@ -11,8 +11,9 @@ import { createSunsetSky } from './sky.js';
 import { createCarMesh, disposeCarMesh, loadCarAssets } from './carmesh.js';
 import { updateCarEffects } from './car-effects.js';
 import * as audio from './audio.js';
-import { PHYS, updateCar } from './physics.js';
+import { PHYS, updateCar, resetHandling } from './physics.js';
 import { resetMotion, savePreviousPose, renderCar } from './motion.js';
+import { updateChaseCamera } from './chase-camera.js';
 import {
   NITRO,
   createNitroPickups,
@@ -300,6 +301,7 @@ function spawnPlayer(p) {
   p.pos.copy(g.pos);
   p.heading = g.heading;
   p.speed = 0;
+  resetHandling(p);
   p.nitroTime = 0;
   p.nitroVisual = 0;
   p.prevSpeed = 0;
@@ -317,6 +319,7 @@ function spawnPlayer(p) {
   p.topSpeed = 0;
   p.input = { steer: 0, throttle: 0, brake: 0 };
   p.steerSmooth = 0;
+  p.skidding = p.squeal = p.offTrack = false;
   p.pitch = 0;
   p.smokeElapsed = null;
   p.skidContacts = null;
@@ -338,7 +341,7 @@ function spawnPlayer(p) {
   p.mesh.position.set(p.pos.x, p.groundY, p.pos.z);
   p.mesh.rotation.set(0, p.heading, 0);
   resetMotion(p);
-  renderCar(p, 1);
+  renderCar(p, 1, G.track);
   updateCarEffects(p, 0);
 
   // Snap camera behind the car immediately.
@@ -366,6 +369,7 @@ function finishPlayer(p, elapsed) {
   if (!recordFinish(p, G.finishOrder, elapsed)) return;
   if (!G.winnerId) G.winnerId = p.id;
   p.speed = p.prevSpeed = p.rpm = p.nitroTime = p.nitroVisual = 0;
+  resetHandling(p);
   p.squeal = p.skidding = p.offTrack = false;
   p.input = { steer: 0, throttle: 0, brake: 0 };
   resetMotion(p);
@@ -436,51 +440,7 @@ function rankings() {
 }
 
 function placeCamera(p, snap = false, dt = 1 / 60) {
-  const pos = p.mesh.position,
-    heading = p.mesh.rotation.y;
-  // Tight chase view: keep the bumper in frame while making the car prominent.
-  const back = 4.8 + (p.nitroVisual || 0) * 0.6,
-    height = pos.y + 1.65,
-    look = 3.5;
-  const fx = Math.sin(heading),
-    fz = Math.cos(heading);
-  const tx = pos.x - fx * back,
-    tz = pos.z - fz * back;
-
-  if (snap) {
-    p.camPos.set(tx, height, tz);
-  } else {
-    // Smooth the *direction* of follow, not the distance.
-    const follow = 1 - Math.pow(1 - 0.22, dt * 60);
-    p.camPos.x += (tx - p.camPos.x) * follow;
-    p.camPos.z += (tz - p.camPos.z) * follow;
-    p.camPos.y += (height - p.camPos.y) * (1 - Math.pow(1 - 0.25, dt * 60));
-  }
-  // Keep distance stable for the current nitro blend, independent of speed lag.
-  let dx = p.camPos.x - pos.x,
-    dz = p.camPos.z - pos.z;
-  const h = Math.hypot(dx, dz) || 1;
-  p.camPos.x = pos.x + (dx / h) * back;
-  p.camPos.z = pos.z + (dz / h) * back;
-
-  const sp = Math.abs(p.speed);
-  p.camera.position.copy(p.camPos);
-
-  // Gentle dynamic FOV for a sense of speed (small, so the car stays big).
-  const targetFov =
-    58 + Math.min(sp / PHYS.maxSpeed, 1) * 5 + (p.nitroVisual || 0) * 5;
-  p.camera.fov +=
-    (targetFov - p.camera.fov) * (snap ? 1 : 1 - Math.pow(1 - 0.08, dt * 60));
-
-  // Look slightly into the corner (at the car's elevation).
-  const rx = Math.cos(heading),
-    rz = -Math.sin(heading);
-  const lead = p.renderSteer * 2;
-  p.camera.lookAt(
-    pos.x + fx * look + rx * lead,
-    pos.y + 0.45,
-    pos.z + fz * look + rz * lead,
-  );
+  updateChaseCamera(p, snap, dt, PHYS.maxSpeed);
 }
 
 function layoutRects(n) {
@@ -1064,13 +1024,18 @@ function updateSmoke(dt) {
   }
 }
 function emitCarSmoke(p, dt = 1 / 60) {
-  if (!p.skidding || p.finished) {
+  const countdown = G.state === 'countdown';
+  const countdownThrottle = countdown
+    ? THREE.MathUtils.clamp(p.input.throttle || 0, 0, 1) : 0;
+  const emitting = countdown ? countdownThrottle > 0.02 : p.skidding;
+  if (!emitting || p.finished) {
     p.smokeElapsed = null;
     return;
   }
   const wheels = p.mesh.userData.wheels || [];
   if (wheels.length < 4) return;
-  const strength = THREE.MathUtils.clamp(Math.abs(p.speed) / PHYS.maxSpeed, 0, 1);
+  const strength = countdownThrottle > 0.02 ? countdownThrottle :
+    THREE.MathUtils.clamp(Math.abs(p.speed) / PHYS.maxSpeed, 0, 1);
   const interval = 1 / (14 + strength * 8);
   p.smokeElapsed = p.smokeElapsed == null ? interval : p.smokeElapsed + dt;
   while (p.smokeElapsed >= interval) {
@@ -1165,13 +1130,24 @@ function updateRace(dt) {
     accumulated -= SIM_STEP;
   }
   for (const p of G.players.values()) {
-    renderCar(p, accumulated / SIM_STEP);
+    renderCar(p, accumulated / SIM_STEP, G.track, dt);
     updateCarEffects(p, dt);
     placeCamera(p, false, dt);
   }
   nitroVisualTime += dt;
   nitroVisuals.update(nitroVisualTime);
 }
+function updateCountdown(dt) {
+  accumulated = 0;
+  for (const p of G.players.values()) {
+    updateCarEffects(p, dt);
+    emitCarSmoke(p, dt);
+    placeCamera(p, false, dt);
+    audio.setEngine(p.id, PHYS.idleRpm, PHYS.redline);
+  }
+  updateSmoke(dt);
+}
+
 function loop(now) {
   const dt = Math.min(MAX_FRAME, Math.max(0, (now - last) / 1000));
   last = now;
@@ -1192,12 +1168,7 @@ function loop(now) {
     sendFeedback(now);
     renderSplit();
   } else if (G.state === 'countdown') {
-    accumulated = 0;
-    for (const p of G.players.values()) {
-      updateCarEffects(p, dt);
-      placeCamera(p, false, dt);
-      audio.setEngine(p.id, PHYS.idleRpm, PHYS.redline);
-    }
+    updateCountdown(dt);
     renderSplit();
   } else {
     accumulated = 0;
