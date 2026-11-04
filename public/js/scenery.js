@@ -248,9 +248,13 @@ function drawSpectator(ctx, x, y, w, h, random) {
     '#6d526f',
   ];
   const skin = ['#d3a078', '#a66d4c', '#e0ba95', '#80573e'];
+  // Seated silhouettes: bent knees, a shorter torso and resting forearms.
   ctx.fillStyle = '#25313c';
-  ctx.fillRect(x + w * 0.27, y + h * 0.65, w * 0.18, h * 0.33);
-  ctx.fillRect(x + w * 0.55, y + h * 0.65, w * 0.18, h * 0.33);
+  ctx.fillRect(x + w * 0.23, y + h * 0.62, w * 0.23, h * 0.3);
+  ctx.fillRect(x + w * 0.54, y + h * 0.62, w * 0.23, h * 0.3);
+  ctx.fillStyle = '#171e24';
+  ctx.fillRect(x + w * 0.19, y + h * 0.89, w * 0.27, h * 0.07);
+  ctx.fillRect(x + w * 0.54, y + h * 0.89, w * 0.27, h * 0.07);
   ctx.fillStyle = shirts[Math.floor(random() * shirts.length)];
   ctx.beginPath();
   ctx.moveTo(x + w * 0.27, y + h * 0.3);
@@ -260,6 +264,8 @@ function drawSpectator(ctx, x, y, w, h, random) {
   ctx.closePath();
   ctx.fill();
   ctx.fillStyle = skin[Math.floor(random() * skin.length)];
+  ctx.fillRect(x + w * 0.19, y + h * 0.48, w * 0.12, h * 0.18);
+  ctx.fillRect(x + w * 0.69, y + h * 0.48, w * 0.12, h * 0.18);
   ctx.beginPath();
   ctx.ellipse(x + w * 0.5, y + h * 0.18, w * 0.18, h * 0.13, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -277,18 +283,32 @@ function drawSpectator(ctx, x, y, w, h, random) {
   ctx.fill();
 }
 
-function crowdTexture(atlas) {
+function crowdTexture(atlas, image = null) {
   const canvas = document.createElement('canvas');
-  canvas.width = atlas ? 256 : 512;
-  canvas.height = 256;
+  canvas.width = atlas ? 256 : 1024;
+  canvas.height = atlas ? 384 : 256;
   const ctx = canvas.getContext('2d'),
     random = randomSequence(140);
-  const columns = atlas ? 4 : 8,
-    rows = atlas ? 2 : 3;
+  const columns = atlas ? 4 : 10,
+    rows = atlas ? 4 : 2;
   const w = canvas.width / columns,
     h = canvas.height / rows;
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < columns; col++) {
+      if (image) {
+        if (random() < 0.15) continue;
+        const cell = Math.floor(random() * 16);
+        // Bake two overlapping seating rows into each distant crowd patch.
+        ctx.drawImage(
+          image,
+          (cell % 4) * image.width / 4,
+          Math.floor(cell / 4) * image.height / 4,
+          image.width / 4, image.height / 4,
+          col * w, row * canvas.height * 0.325,
+          w, canvas.height * 0.675,
+        );
+        continue;
+      }
       drawSpectator(
         ctx,
         col * w + w * 0.06,
@@ -300,7 +320,7 @@ function crowdTexture(atlas) {
     }
   }
   const texture = new THREE.CanvasTexture(canvas);
-  texture.name = atlas ? 'spectator-atlas-4x2' : 'distant-crowd-patch';
+  texture.name = atlas ? 'spectator-fallback-4x4' : 'distant-crowd-patch';
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 4;
   return texture;
@@ -313,62 +333,85 @@ function billboardMaterial(map, atlas) {
     side: THREE.DoubleSide,
   });
   // Alpha cutouts write depth: no sorting glitches between crowd rows. The
-  // view-space offset uses the CURRENT render camera, including split screen.
+  // Upright cards face the CURRENT render camera, including split screen.
   material.onBeforeCompile = (shader) => {
     if (atlas) {
       shader.vertexShader =
-        'attribute float atlasCell;\n' + shader.vertexShader;
+        'attribute float atlasCell;\nattribute float crowdMirror;\n' + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace(
         '#include <uv_vertex>',
         `
         #include <uv_vertex>
-        vMapUv = (vMapUv + vec2(mod(atlasCell, 4.0), floor(atlasCell / 4.0))) / vec2(4.0, 2.0);
+        vMapUv.x = mix(vMapUv.x, 1.0 - vMapUv.x, crowdMirror);
+        vMapUv = (clamp(vMapUv, vec2(0.003), vec2(0.997))
+          + vec2(mod(atlasCell, 4.0), floor(atlasCell / 4.0))) / 4.0;
       `,
       );
     }
     shader.vertexShader = shader.vertexShader.replace(
       '#include <project_vertex>',
       `
-      vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
-      mvPosition.xy += position.xy;
+      vec3 centre = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+      vec3 facing = cameraPosition - centre;
+      vec3 right = normalize(vec3(facing.z + 0.00001, 0.0, -facing.x));
+      vec3 crowdWorldPosition = centre + right * position.x * length(instanceMatrix[0].xyz)
+        + vec3(0.0, position.y * length(instanceMatrix[1].xyz), 0.0);
+      vec4 mvPosition = viewMatrix * vec4(crowdWorldPosition, 1.0);
       gl_Position = projectionMatrix * mvPosition;
     `,
     );
   };
   material.customProgramCacheKey = () =>
-    atlas ? 'crowd-billboard-atlas-v1' : 'crowd-billboard-patch-v1';
+    atlas ? 'crowd-upright-atlas-v2' : 'crowd-upright-patch-v2';
   return material;
 }
 
-function crowdMesh(material, distant) {
-  const rows = distant ? 2 : 6,
-    columns = distant ? 6 : 48;
+function crowdMesh(material, distant, seed) {
+  const rows = distant ? 4 : 8,
+    columns = distant ? 4 : 40;
   const geometry = new THREE.PlaneGeometry(
-    distant ? 7 : 0.84,
-    distant ? 4.6 : 1.8,
+    distant ? 9 : 0.9,
+    distant ? 2 : 1.35,
   );
   const cells = new Float32Array(rows * columns);
+  const mirrors = new Float32Array(cells.length);
   const crowd = new THREE.InstancedMesh(geometry, material, cells.length);
   crowd.name = distant ? 'crowd-distant' : 'crowd-near';
-  const random = randomSequence(90),
-    matrix = new THREE.Matrix4();
+  const random = randomSequence(seed),
+    matrix = new THREE.Matrix4(),
+    tint = new THREE.Color();
+  let count = 0;
   for (let row = 0; row < rows; row++) {
+    let emptyGroup = false;
     for (let col = 0; col < columns; col++) {
-      const index = row * columns + col;
-      const seatingRow = distant ? row * 3 + 1 : row;
-      const x = ((col + 0.5) * 42) / columns - 21;
-      const y = 2.1 + seatingRow * 1.25 + (distant ? 1.8 : 0.9);
-      matrix.makeTranslation(x, y, 1 + seatingRow * 2 + (random() - 0.5) * 0.3);
-      crowd.setMatrixAt(index, matrix);
-      cells[index] = Math.floor(random() * 8);
+      // Neighbouring seats tend to fill together, with occasional pairs empty.
+      if (col % 2 === 0) emptyGroup = random() < 0.12;
+      if (!distant && (emptyGroup || random() < 0.05)) continue;
+      const seatingRow = distant ? row * 2 + 0.5 : row;
+      const block = distant ? col : Math.floor(col / 10);
+      const x = -16.5 + block * 11 + (distant ? 0 : ((col % 10) - 4.5) * 0.9);
+      const size = distant ? 1 : 0.94 + random() * 0.12;
+      const y = 1.4 + seatingRow * 0.65 + 0.675 * size;
+      matrix.makeScale(size, size, size);
+      matrix.setPosition(x, y, 0.78 + seatingRow * 1.4);
+      crowd.setMatrixAt(count, matrix);
+      // Mild tint variation preserves natural skin tones and breaks repetition.
+      tint.setRGB(0.86 + random() * 0.14, 0.86 + random() * 0.12, 0.84 + random() * 0.12);
+      crowd.setColorAt(count, tint);
+      mirrors[count] = random() < 0.5 ? 0 : 1;
+      cells[count++] = Math.floor(random() * 16);
     }
   }
-  if (!distant)
+  if (!distant) {
     geometry.setAttribute(
       'atlasCell',
       new THREE.InstancedBufferAttribute(cells, 1),
     );
+    geometry.setAttribute('crowdMirror', new THREE.InstancedBufferAttribute(mirrors, 1));
+  }
+  crowd.count = count;
   crowd.instanceMatrix.needsUpdate = true;
+  crowd.instanceColor.needsUpdate = true;
   crowd.computeBoundingSphere();
   return crowd;
 }
@@ -377,23 +420,95 @@ function standGeometry(detailed, groundBase, baseY) {
   const parts = [];
   const box = (w, h, d, x, y, z, colour) =>
     parts.push([new THREE.BoxGeometry(w, h, d).translate(x, y, z), colour]);
-  // Foundation extends below the terrain, so raised stands never float on slopes.
+  const beam = (a, b, width, depth, colour) => {
+    const start = new THREE.Vector3(...a), end = new THREE.Vector3(...b);
+    const direction = end.clone().sub(start);
+    const geometry = new THREE.BoxGeometry(width, direction.length(), depth);
+    geometry.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0), direction.clone().normalize(),
+    ));
+    geometry.translate(...start.add(end).multiplyScalar(0.5).toArray());
+    parts.push([geometry, colour]);
+  };
+  const concrete = 0x858984, steel = 0x4b5559, rail = 0xb3b9b8;
+  const blocks = [-16.5, -5.5, 5.5, 16.5];
+  // A retaining plinth embeds the structure into the sloping embankment.
   const bottom = groundBase - baseY - 1;
-  box(44, 2 - bottom, 12, 0, (2 + bottom) / 2, 6, 0x686d70);
-  for (let row = 1; row < 6; row++) {
-    box(44, 1.25, 12 - row * 2, 0, 2 + (row - 0.5) * 1.25, 6 + row, 0x7c8286);
-  }
-  // Rear canopy and pillars are combined into the same draw call as the tiers.
-  box(47, 0.45, 9, 0, 12, 8.5, 0x3d505c);
-  for (const x of [-21, 0, 21]) box(0.35, 10, 0.35, x, 7, 11.8, 0x424b50);
-  if (detailed) {
-    for (const x of [-22, 22]) {
-      for (let row = 0; row < 6; row++) {
-        box(0.12, 1.1, 0.12, x, 2.55 + row * 1.25, row * 2 + 0.5, 0xabb3b8);
-        box(0.12, 0.12, 2, x, 3.1 + row * 1.25, row * 2 + 1, 0xabb3b8);
+  box(44, 1.4 - bottom, 12.6, 0, (1.4 + bottom) / 2, 6.1, 0x696e6b);
+  for (let row = 0; row < 8; row++) {
+    const y = 1.4 + row * 0.65, z = row * 1.4;
+    if (row > 0) box(44, 0.65, 12.4 - z, 0, y - 0.325, (12.4 + z) / 2, concrete);
+    box(44, 0.08, 0.12, 0, y + 0.015, z + 0.06, 0xbabbb2);
+    for (let block = 0; block < blocks.length; block++) {
+      const colour = block % 2 ? 0x496c78 : 0x647f87;
+      if (detailed) {
+        for (let seat = 0; seat < 10; seat++) {
+          const x = blocks[block] + (seat - 4.5) * 0.9;
+          box(0.12, 0.38, 0.14, x, y + 0.19, z + 0.95, steel);
+          box(0.72, 0.1, 0.52, x, y + 0.43, z + 0.85, colour);
+          const back = new THREE.BoxGeometry(0.7, 0.52, 0.09);
+          back.rotateX(0.12).translate(x, y + 0.71, z + 1.12);
+          parts.push([back, colour]);
+        }
+      } else {
+        box(8.8, 0.48, 0.12, blocks[block], y + 0.7, z + 1.12, colour);
       }
     }
-    box(44, 0.12, 0.12, 0, 3.1, 0.15, 0xabb3b8);
+    if (detailed && row < 7) {
+      for (const x of [-11, 0, 11]) {
+        // Four normal-height treads connect each pair of seating terraces.
+        for (let step = 1; step <= 4; step++) {
+          const top = y + step * 0.1625;
+          const depth = 1.4 - (step - 1) * 0.35;
+          box(1.6, step * 0.1625, depth, x, (y + top) / 2,
+            z + (step - 1) * 0.35 + depth / 2, 0x999b93);
+          box(1.6, 0.025, 0.055, x, top + 0.015, z + (step - 1) * 0.35 + 0.03, 0xc9b77e);
+        }
+      }
+    }
+  }
+  // Sloped metal canopy, with visible rafters, columns and knee braces.
+  const roof = new THREE.BoxGeometry(47, 0.18, 14);
+  roof.rotateX(-0.065).translate(0, 8.85, 6.1);
+  parts.push([roof, 0x697b80]);
+  for (const x of [-21.7, -11, 0, 11, 21.7]) {
+    box(0.25, 7.7, 0.25, x, 5.25, 12, steel);
+    box(0.55, 0.12, 0.55, x, 6.02, 12, 0xa4a6a1);
+    beam([x, 8.15, -0.8], [x, 9.05, 12.9], 0.18, 0.3, steel);
+    beam([x, 6.8, 12], [x, 8.75, 7.5], 0.14, 0.14, steel);
+  }
+  box(47, 0.4, 0.18, 0, 8.25, -0.85, 0x35464e);
+  box(47, 0.25, 0.18, 0, 9.2, 13, steel);
+  if (detailed) {
+    for (let x = -22.5; x <= 22.5; x += 1.5)
+      beam([x, 8.5, -0.85], [x, 9.4, 13], 0.035, 0.04, 0x8d9a9c);
+    for (const z of [2.5, 6, 9.5])
+      box(46, 0.13, 0.12, 0, 8.35 + (z + 0.8) * 0.065, z, steel);
+    // Rear cross-bracing and continuous safety rails enclose the concourse.
+    for (const x of [-16.5, 16.5]) {
+      beam([x - 5, 2, 12.1], [x + 5, 8.9, 12.1], 0.09, 0.09, steel);
+      beam([x + 5, 2, 12.1], [x - 5, 8.9, 12.1], 0.09, 0.09, steel);
+    }
+    for (let x = -22; x <= 22; x += 2.75)
+      box(0.06, 1.1, 0.06, x, 6.5, 12.3, rail);
+    for (const y of [6.5, 7.05]) box(44, 0.06, 0.06, 0, y, 12.3, rail);
+    for (const x of [-22, 22]) {
+      for (let row = 0; row < 8; row++) {
+        box(0.06, 1.1, 0.06, x, 1.95 + row * 0.65, row * 1.4 + 0.2, rail);
+      }
+      for (const height of [2, 2.5])
+        beam([x, height, 0.2], [x, height + 4.55, 10], 0.06, 0.06, rail);
+    }
+    for (const x of blocks) {
+      for (const offset of [-4.5, -1.5, 1.5, 4.5])
+        box(0.06, 1.1, 0.06, x + offset, 1.95, -0.12, rail);
+      for (const y of [1.95, 2.5]) box(9.4, 0.06, 0.06, x, y, -0.12, rail);
+    }
+    for (const x of [-11, 0, 11]) {
+      for (let row = 0; row < 7; row++)
+        box(0.05, 1, 0.05, x, 2.06 + row * 0.65, row * 1.4 + 0.35, rail);
+      beam([x, 2.56, 0.35], [x, 6.46, 8.75], 0.055, 0.055, rail);
+    }
   }
   return mergeColoured(parts);
 }
@@ -408,6 +523,28 @@ function buildGrandstands(root, samples, tangents, halfWidth, groundBase) {
   });
   const nearMaterial = billboardMaterial(crowdTexture(true), true);
   const farMaterial = billboardMaterial(crowdTexture(false), false);
+  // Keep the procedural crowd while loading, and if the local image fails.
+  root.userData.spectatorTextureReady = false;
+  const spectatorTexture = new THREE.TextureLoader().load(
+    '/assets/spectator-atlas.png',
+    (texture) => {
+      const nearFallback = nearMaterial.map, farFallback = farMaterial.map;
+      nearMaterial.map = texture;
+      farMaterial.map = crowdTexture(false, texture.image);
+      nearMaterial.needsUpdate = farMaterial.needsUpdate = true;
+      nearFallback.dispose();
+      farFallback.dispose();
+      root.userData.spectatorTextureReady = true;
+    },
+    undefined,
+    (error) => {
+      root.userData.spectatorTextureError = true;
+      console.warn('Spectator texture failed to load; using procedural crowd.', error);
+    },
+  );
+  spectatorTexture.name = 'photographic-spectators-4x4';
+  spectatorTexture.colorSpace = THREE.SRGBColorSpace;
+  spectatorTexture.anisotropy = 4;
   // An emissive fascia: only the lettering/stripe exceed the HDR bloom
   // threshold, leaving the dark board and concrete structure unlit.
   const signCanvas = document.createElement('canvas');
@@ -419,7 +556,7 @@ function buildGrandstands(root, samples, tangents, halfWidth, groundBase) {
   signContext.fillStyle = '#e1eff5';
   signContext.font = 'bold 40px sans-serif';
   signContext.textAlign = 'center';
-  signContext.fillText('BURNOUT', 512, 46);
+  signContext.fillText('Mahinda mahattayata jayawewa!', 512, 46);
   signContext.fillStyle = '#64c9e8';
   signContext.fillRect(20, 57, 984, 3);
   const signTexture = new THREE.CanvasTexture(signCanvas);
@@ -431,7 +568,7 @@ function buildGrandstands(root, samples, tangents, halfWidth, groundBase) {
     emissiveIntensity: 1.6,
     roughness: 0.8,
   });
-  const signGeometry = new THREE.PlaneGeometry(32, 1.5);
+  const signGeometry = new THREE.PlaneGeometry(32, 0.75);
   for (const fraction of [0.025, 0.29, 0.54, 0.81]) {
     const index = Math.floor(samples.length * fraction),
       c = samples[index],
@@ -476,11 +613,11 @@ function buildGrandstands(root, samples, tangents, halfWidth, groundBase) {
       const sign = new THREE.Mesh(signGeometry, signMaterial);
       sign.name = 'grandstand-sponsor-board';
       sign.rotation.y = Math.PI;
-      sign.position.set(0, 11, 3.95);
+      sign.position.set(0, 8.12, -0.96);
       group.add(sign);
       if (level < 2)
         group.add(
-          crowdMesh(level === 0 ? nearMaterial : farMaterial, level === 1),
+          crowdMesh(level === 0 ? nearMaterial : farMaterial, level === 1, 90 + stands.length * 137),
         );
       // Three.js updates LOD for each render camera. No hysteresis state shared
       // between a nearby player's viewport and another player's distant view.

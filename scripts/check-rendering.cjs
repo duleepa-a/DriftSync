@@ -92,6 +92,8 @@ app.post('/render-result', express.json({ limit: '32mb' }), (req, res) => {
     'boostScreenshot',
     'brakeReverseScreenshot',
     'sceneryScreenshot',
+    'grandstandScreenshot',
+    'spectatorScreenshot',
     'smokeScreenshot',
     'driftScreenshot',
     'groundingScreenshot',
@@ -235,7 +237,7 @@ report.id = 'render-result';
 document.body.appendChild(report);
 const cases = [];
 const motion = [];
-let screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, smokeScreenshot, driftScreenshot, groundingScreenshot, exhaustScreenshot, shadowOffScreenshot, carShadow, nitro, bloom;
+let screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, grandstandScreenshot, spectatorScreenshot, smokeScreenshot, driftScreenshot, groundingScreenshot, exhaustScreenshot, shadowOffScreenshot, carShadow, nitro, bloom;
 let shaderError;
 renderer.debug.onShaderError = (gl, program, vertex, fragment) => {
   shaderError = [gl.getProgramInfoLog(program), gl.getShaderInfoLog(vertex), gl.getShaderInfoLog(fragment)].join('\\n');
@@ -371,7 +373,8 @@ try {
   const deadline = performance.now() + 30000;
   const forest = scene.getObjectByName('instanced-pine-forest');
   const sceneryRoot = scene.getObjectByName('track-scenery');
-  while ((!G.assetsReady || !G.environmentReady || !forest.userData.textureReady || !sceneryRoot.userData.forestDetailsReady) && performance.now() < deadline) await new Promise(r => setTimeout(r, 50));
+  while ((!G.assetsReady || !G.environmentReady || !forest.userData.textureReady || !sceneryRoot.userData.forestDetailsReady || !sceneryRoot.userData.spectatorTextureReady) && performance.now() < deadline) await new Promise(r => setTimeout(r, 50));
+  if (!sceneryRoot.userData.spectatorTextureReady) throw new Error('Photographic spectator atlas failed to load');
   if (!G.assetsReady) throw new Error('Car assets did not load');
   if (!forest.userData.textureReady || !forest.visible || !forest.material.map.image?.width) throw new Error('Realistic tree atlas failed to load');
   if (!sceneryRoot.userData.forestDetailsReady) throw new Error('Optimized 3D pines failed to load');
@@ -393,6 +396,36 @@ try {
   const shoulder = rough.data[1] / 255;
   if (centre < 0.7 || centre > 0.85 || shoulder < 0.9 || shoulder - centre < 0.08 || asphalt.metalness !== 0 || asphalt.envMapIntensity > 0.85) throw new Error('Dry asphalt must retain subtle wear without a glossy reflection stripe');
   bloom = checkBloom();
+  // Inspect seating and roof construction up close, and exercise LOD changes
+  // in both directions as happens when rendering different player cameras.
+  const grandstand = sceneryRoot.children.find(child => child.isLOD);
+  if (!grandstand) throw new Error('No grandstands were built');
+  scene.updateMatrixWorld(true);
+  const standCamera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 2500);
+  const crowd = grandstand.getObjectByName('crowd-near');
+  const atlasCanvas = document.createElement('canvas');
+  atlasCanvas.width = crowd.material.map.image.width;
+  atlasCanvas.height = crowd.material.map.image.height;
+  const atlasContext = atlasCanvas.getContext('2d');
+  atlasContext.drawImage(crowd.material.map.image, 0, 0);
+  const atlasPixels = atlasContext.getImageData(0, 0, atlasCanvas.width, atlasCanvas.height).data;
+  let emptyPixels = 0, solidPixels = 0;
+  for (let i = 3; i < atlasPixels.length; i += 4) {
+    if (atlasPixels[i] < 20) emptyPixels++;
+    if (atlasPixels[i] > 230) solidPixels++;
+  }
+  if (emptyPixels < atlasPixels.length / 16 || solidPixels < atlasPixels.length / 16) throw new Error('Spectator atlas needs both transparent gaps and opaque people');
+  for (const [distance, expectedLevel] of [[48, 0], [230, 1], [480, 2], [48, 0], [19, 0]]) {
+    standCamera.position.copy(grandstand.localToWorld(new THREE.Vector3(distance * 0.35, distance < 30 ? 6 : 13, -distance)));
+    standCamera.lookAt(grandstand.localToWorld(new THREE.Vector3(0, 4.5, 5)));
+    renderPass.camera = standCamera;
+    renderer.setRenderTarget(null); renderer.setViewport(0, 0, innerWidth, innerHeight);
+    renderer.setScissorTest(false); renderer.clear(); composer.render();
+    inspectFrame('grandstand LOD ' + expectedLevel, 1);
+    if (!grandstand.levels[expectedLevel].object.visible) throw new Error('Grandstand LOD did not follow the current camera');
+    if (distance === 48) grandstandScreenshot = renderer.domElement.toDataURL('image/png');
+    if (distance === 19) spectatorScreenshot = renderer.domElement.toDataURL('image/png');
+  }
   renderOverview(0);
   const code = document.getElementById('joinCode').getBoundingClientRect();
   const mode = document.querySelector('.driving-mode').getBoundingClientRect();
@@ -680,7 +713,7 @@ try {
   const stands = scene.getObjectByName('track-scenery').children.filter(child => child.isLOD);
   const scenery = { trees: forest.count, forestTriangles: forest.count * forest.geometry.index.count / 3, treeAtlasLoaded: forest.userData.textureReady, nearTreeCandidates: forest.userData.nearCandidates.length, nearTreeLimit: 8, nearTreeMaterials: sceneryRoot.userData.forestDetails.meshes.length, grandstands: stands.length };
   const finishing = await checkFinishing();
-  report.textContent = JSON.stringify({ devicePixelRatio, lobbyScreenshotPath, motion, nitro, bloom, carShadow, scenery, finishing, cases, screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, smokeScreenshot, driftScreenshot, groundingScreenshot, exhaustScreenshot, shadowOffScreenshot });
+  report.textContent = JSON.stringify({ devicePixelRatio, lobbyScreenshotPath, motion, nitro, bloom, carShadow, scenery, finishing, cases, screenshot, nitroScreenshot, boostScreenshot, brakeReverseScreenshot, sceneryScreenshot, grandstandScreenshot, spectatorScreenshot, smokeScreenshot, driftScreenshot, groundingScreenshot, exhaustScreenshot, shadowOffScreenshot });
 } catch (error) { report.textContent = JSON.stringify({ error: error.stack }); }
 await fetch('/render-result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: report.textContent });
 `),
