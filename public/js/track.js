@@ -234,7 +234,6 @@ export function buildTrack(scene) {
     terrainHeight,
     groundBase,
   );
-  buildTireBarriers(scene, samples, tangents, halfWidth);
 
   // ---------- Lap gates ----------
   const GATE_COUNT = 24;
@@ -707,43 +706,6 @@ function buildStartLine(scene, samples, tangents, halfWidth) {
   strip.name = 'start-finish-line';
   strip.receiveShadow = true;
   scene.add(strip);
-}
-
-// Stacks of tires lining the inside of the walls (decorative).
-function buildTireBarriers(scene, samples, tangents, halfWidth) {
-  const N = samples.length;
-  const geo = new THREE.TorusGeometry(1.0, 0.42, 8, 12);
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0x14151a,
-    roughness: 0.95,
-  });
-  const step = 6;
-  const inst = new THREE.InstancedMesh(geo, mat, Math.ceil(N / step) * 2 + 4);
-  inst.castShadow = true;
-  const m = new THREE.Matrix4(),
-    q = new THREE.Quaternion();
-  q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2); // lay tire flat
-  let count = 0;
-  const off = halfWidth - 0.7;
-  for (let i = 0; i < N; i += step) {
-    const c = samples[i],
-      n = sideNormal(tangents[i]);
-    for (const side of [-1, 1]) {
-      m.compose(
-        new THREE.Vector3(
-          c.x + n.x * off * side,
-          c.y + 0.7,
-          c.z + n.z * off * side,
-        ),
-        q,
-        new THREE.Vector3(1, 1, 1),
-      );
-      inst.setMatrixAt(count++, m);
-    }
-  }
-  inst.count = count;
-  inst.instanceMatrix.needsUpdate = true;
-  scene.add(inst);
 }
 
 function makeStartGrid(samples, tangents, halfWidth) {
