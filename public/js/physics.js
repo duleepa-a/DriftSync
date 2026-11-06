@@ -5,7 +5,8 @@ export const PHYS = {
   maxSpeed: 46,
   accel: 26,
   dragK: 0.004,
-  coastDecel: 0.89408, // 2 mph per second, expressed in m/s².
+  coastDecel: 0.6, // Rolling resistance and light engine braking, in m/s².
+  coastDrag: 0.0008, // Aerodynamic drag grows with speed squared.
   brakeDecel: 55,
   reverseAccel: 16,
   reverseMax: -12,
@@ -19,6 +20,7 @@ export const PHYS = {
   driftEnterAngle: 0.12,
   driftExitAngle: 0.055,
   driftBrakeScale: 0.2,
+  driftSteerScale: 0.865,
   wallScrub: 0.86,
   gears: 8,
   idleRpm: 4000,
@@ -103,7 +105,9 @@ function updateHandling(p, dt, steer, brake) {
 
     const rollingGrip = clamp(speed / 6, 0, 1);
     const understeer = 1 - clamp((speed - 30) / 90, 0, 0.4);
-    const requestedYaw = steer * PHYS.turnRate * rollingGrip * understeer;
+    const driftSteer = sliding ? PHYS.driftSteerScale : 1;
+    const requestedYaw =
+      steer * PHYS.turnRate * rollingGrip * understeer * driftSteer;
     if (p.speed <= 4) {
       // Avoid unstable tire-slip division near rest and preserve reverse steering.
       p.yawRate += (requestedYaw * Math.sign(p.speed) - p.yawRate) * (1 - Math.exp(-step * 12));
@@ -173,9 +177,11 @@ export function updateCar(
       (slideBraking ? PHYS.driftBrakeScale : 1);
     else p.speed -= PHYS.reverseAccel * brake * dt;
   } else if (throttle <= 0.02) {
-    // Released accelerator: a steady 2 mph/s loss, without crossing zero.
-    const decel = PHYS.coastDecel * dt;
-    p.speed = Math.sign(p.speed) * Math.max(0, Math.abs(p.speed) - decel);
+    // Released accelerator: aero drag tapers with speed; rolling resistance
+    // keeps coasting from lingering near rest without crossing zero.
+    const speed = Math.abs(p.speed);
+    const decel = (PHYS.coastDecel + PHYS.coastDrag * speed * speed) * dt;
+    p.speed = Math.sign(p.speed) * Math.max(0, speed - decel);
   } else if (p.speed <= speedLimit) {
     const drag = PHYS.dragK * p.speed * Math.abs(p.speed);
     p.speed = Math.min(
