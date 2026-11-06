@@ -234,7 +234,6 @@ export function buildTrack(scene) {
     terrainHeight,
     groundBase,
   );
-  buildTireBarriers(scene, samples, tangents, halfWidth);
 
   // ---------- Lap gates ----------
   const GATE_COUNT = 24;
@@ -581,8 +580,8 @@ function buildCatchFence(scene, samples, tangents, off) {
   scene.add(inst);
 }
 
-// Overhead start/finish gantry. Returns the 5 light materials so the host can
-// run the F1 start sequence (lights on one-by-one, then out = GO).
+// Overhead start/finish gantry. Returns the 5 lamp materials so the host can
+// run the start sequence (lights on one-by-one, then out = GO).
 function buildStartGantry(scene, start, tangent, halfWidth) {
   const n = sideNormal(tangent);
   const h = 9;
@@ -598,6 +597,21 @@ function buildStartGantry(scene, start, tangent, halfWidth) {
     metalness: 0.6,
     roughness: 0.5,
   });
+  const lampHousingMat = new THREE.MeshStandardMaterial({
+    color: 0x080a0d,
+    metalness: 0.55,
+    roughness: 0.65,
+  });
+  const bezelMat = new THREE.MeshStandardMaterial({
+    color: 0x20252b,
+    metalness: 0.7,
+    roughness: 0.35,
+  });
+  const housingGeometry = new THREE.CylinderGeometry(0.78, 0.78, 0.9, 32);
+  housingGeometry.rotateX(Math.PI / 2);
+  const bezelGeometry = new THREE.CylinderGeometry(0.64, 0.64, 0.13, 32);
+  bezelGeometry.rotateX(Math.PI / 2);
+  const lensGeometry = new THREE.SphereGeometry(0.52, 24, 16);
 
   for (const side of [-1, 1]) {
     const post = new THREE.Mesh(new THREE.BoxGeometry(1.2, h, 1.2), metal);
@@ -622,18 +636,37 @@ function buildStartGantry(scene, start, tangent, halfWidth) {
   for (let i = 0; i < 5; i++) {
     const off = (i - 2) * 3;
     const mat = new THREE.MeshStandardMaterial({
-      color: 0x220000,
+      color: 0x260505,
       emissive: 0x330000,
-      emissiveIntensity: 0.25,
+      emissiveIntensity: 0.15,
+      roughness: 0.28,
     });
-    const lp = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.6, 0.4), mat);
-    lp.position.set(
+    const lamp = new THREE.Group();
+    lamp.position.set(
       start.x + n.x * off - tangent.x * 1.3,
       base + h,
       start.z + n.z * off - tangent.z * 1.3,
     );
-    lp.rotation.y = Math.atan2(tangent.x, tangent.z);
-    scene.add(lp);
+    // Face the cars as they approach the start line.
+    lamp.rotation.y = Math.atan2(-tangent.x, -tangent.z);
+
+    const housing = new THREE.Mesh(housingGeometry, lampHousingMat);
+    housing.castShadow = true;
+    lamp.add(housing);
+    const bezel = new THREE.Mesh(bezelGeometry, bezelMat);
+    bezel.position.z = 0.48;
+    lamp.add(bezel);
+    const lens = new THREE.Mesh(lensGeometry, mat);
+    lens.scale.set(1, 1, 0.18);
+    lens.position.z = 0.56;
+    lamp.add(lens);
+
+    const glow = new THREE.PointLight(0xff1818, 0, 12, 2);
+    glow.position.z = 0.7;
+    lamp.add(glow);
+    mat.userData.signalLight = glow;
+
+    scene.add(lamp);
     lights.push(mat);
   }
   return lights;
@@ -685,10 +718,24 @@ function buildStartLine(scene, samples, tangents, halfWidth) {
     const squareWidth = (1024 - inset * 2) / 16;
     for (let row = 0; row < 2; row++) {
       for (let column = 0; column < 16; column++) {
-        ctx.fillStyle = (row + column) % 2 === 0 ? '#f4f4f4' : '#141414';
+        const lightSquare = (row + column) % 2 === 0;
         const left = Math.round(inset + column * squareWidth);
         const right = Math.round(inset + (column + 1) * squareWidth);
-        ctx.fillRect(left, row * 64, right - left, 64);
+        const top = row * 64;
+        // Slightly inset paint leaves a fine asphalt seam between blocks.
+        ctx.fillStyle = lightSquare ? '#deddd6' : '#292a2c';
+        ctx.fillRect(left + 1, top + 1, right - left - 2, 62);
+
+        if (lightSquare) {
+          // Fine, deterministic scuffs keep the white paint from looking new.
+          ctx.fillStyle = 'rgba(76, 74, 68, 0.09)';
+          for (let mark = 0; mark < 3; mark++) {
+            const x =
+              left + 3 + ((column * 17 + row * 11 + mark * 23) % (right - left - 6));
+            const y = top + 4 + ((column * 9 + mark * 19) % 56);
+            ctx.fillRect(x, y, 2 + ((column + mark) % 4), 1);
+          }
+        }
       }
     }
   });
@@ -707,43 +754,6 @@ function buildStartLine(scene, samples, tangents, halfWidth) {
   strip.name = 'start-finish-line';
   strip.receiveShadow = true;
   scene.add(strip);
-}
-
-// Stacks of tires lining the inside of the walls (decorative).
-function buildTireBarriers(scene, samples, tangents, halfWidth) {
-  const N = samples.length;
-  const geo = new THREE.TorusGeometry(1.0, 0.42, 8, 12);
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0x14151a,
-    roughness: 0.95,
-  });
-  const step = 6;
-  const inst = new THREE.InstancedMesh(geo, mat, Math.ceil(N / step) * 2 + 4);
-  inst.castShadow = true;
-  const m = new THREE.Matrix4(),
-    q = new THREE.Quaternion();
-  q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2); // lay tire flat
-  let count = 0;
-  const off = halfWidth - 0.7;
-  for (let i = 0; i < N; i += step) {
-    const c = samples[i],
-      n = sideNormal(tangents[i]);
-    for (const side of [-1, 1]) {
-      m.compose(
-        new THREE.Vector3(
-          c.x + n.x * off * side,
-          c.y + 0.7,
-          c.z + n.z * off * side,
-        ),
-        q,
-        new THREE.Vector3(1, 1, 1),
-      );
-      inst.setMatrixAt(count++, m);
-    }
-  }
-  inst.count = count;
-  inst.instanceMatrix.needsUpdate = true;
-  scene.add(inst);
 }
 
 function makeStartGrid(samples, tangents, halfWidth) {

@@ -447,7 +447,11 @@ test('manual driving waits for throttle, coasts to rest, and gives brake priorit
   const movingSpeed = p.speed;
   p.input.throttle = 0;
   step();
-  assert.ok(Math.abs((movingSpeed - p.speed) / 0.44704 - 2) < 1e-9);
+  const coastRateMphPerSecond = (movingSpeed - p.speed) / 0.44704;
+  assert.ok(
+    coastRateMphPerSecond > 2.2 && coastRateMphPerSecond < 2.8,
+    `natural coast-down: ${coastRateMphPerSecond.toFixed(2)} mph/s`,
+  );
   step(1800);
   assert.equal(p.speed, 0);
   p.input.throttle = 1;

@@ -830,18 +830,28 @@ socket.on('disconnect', () => {
 
 function setLight(mat, state) {
   if (!mat) return;
+  const glow = mat.userData.signalLight;
   if (state === 'red') {
-    mat.emissive.setHex(0xff1111);
-    mat.emissiveIntensity = 2.4;
-    mat.color.setHex(0x440000);
+    mat.emissive.setHex(0xff1717);
+    mat.emissiveIntensity = 3;
+    mat.color.setHex(0x7f0909);
+    if (glow) {
+      glow.color.setHex(0xff1818);
+      glow.intensity = 2.8;
+    }
   } else if (state === 'green') {
     mat.emissive.setHex(0x22ff44);
-    mat.emissiveIntensity = 2.4;
-    mat.color.setHex(0x004400);
+    mat.emissiveIntensity = 3;
+    mat.color.setHex(0x087f20);
+    if (glow) {
+      glow.color.setHex(0x22ff44);
+      glow.intensity = 2.8;
+    }
   } else {
     mat.emissive.setHex(0x330000);
-    mat.emissiveIntensity = 0.25;
-    mat.color.setHex(0x220000);
+    mat.emissiveIntensity = 0.15;
+    mat.color.setHex(0x260505);
+    if (glow) glow.intensity = 0;
   }
 }
 
@@ -857,37 +867,36 @@ function startGame() {
   G.state = 'countdown';
   autoAccelerate.disabled = true;
 
-  // F1 start lights: 5 reds illuminate one-by-one, then all go out = GO.
+  // The red lamps build one by one; all go dark after a variable hold = GO.
   const lights = G.track.startLights || [];
   lights.forEach((m) => setLight(m, 'off'));
+  const firstLightDelayMs = 500;
+  const lightIntervalMs = 500;
   for (let i = 0; i < lights.length; i++) {
     setTimeout(
       () => {
         if (epoch === raceEpoch && G.state === 'countdown')
           setLight(lights[i], 'red');
       },
-      500 + i * 500,
+      firstLightDelayMs + i * lightIntervalMs,
     );
   }
 
-  // Discrete 3-2-1-GO countdown banner.
-  showBanner('3', 0);
-  setTimeout(() => {
-    if (epoch === raceEpoch && G.state === 'countdown') showBanner('2', 0);
-  }, 1000);
-  setTimeout(() => {
-    if (epoch === raceEpoch && G.state === 'countdown') showBanner('1', 0);
-  }, 2000);
+  showBanner('READY', 0);
+  const allRedAtMs = lights.length
+    ? firstLightDelayMs + (lights.length - 1) * lightIntervalMs
+    : 0;
+  const randomHoldMs = 700 + Math.random() * 1400;
   setTimeout(() => {
     if (epoch !== raceEpoch || G.state !== 'countdown') return;
     showBanner('GO!', 900);
     lights.forEach((m) => setLight(m, 'green'));
+    G.state = 'racing';
+    G.raceStart = performance.now();
     setTimeout(() => {
       if (epoch === raceEpoch) lights.forEach((m) => setLight(m, 'off'));
     }, 1200);
-    G.state = 'racing';
-    G.raceStart = performance.now();
-  }, 3000);
+  }, allRedAtMs + randomHoldMs);
 }
 
 function endRace() {
