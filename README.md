@@ -94,6 +94,3 @@ Run `npm run test:render -- --profile-forest` to compare the original PNG cutout
 
 The McLaren's 2,302 imported mesh pieces are batched by material into 22 meshes. Its windows and lamp covers use alpha transparency and environment reflections instead of physical transmission, avoiding an extra render of the track for every camera. The original model geometry and textures are preserved. Run `npm run test:render -- --profile-car` to compare the Ferrari, the batched McLaren with its original glass, and the optimized McLaren in the same scene. The report includes full-frame draw calls and render timings after warm-up; Chrome uses software rendering, so these timings compare rendering cost rather than predict the laptop's gameplay FPS.
 
-The car retains its real-time sunset shadow. A two-triangle procedural ground shade keeps the contact area visible on dark asphalt, where the sun's shallow angle produces little direct road lighting. Its Gaussian edge fades softly, and its pose follows the road height and slope independently of body lean so it does not cut through the road. The browser render check compares frames with that ground shade enabled and disabled.
-
-The included Ferrari model and HDR environments come from the Three.js example assets.
