@@ -61,7 +61,3 @@ Key files:
 | `public/js/carmesh.js`       | Car asset loading, cloning, and disposal                                     |
 | `public/js/audio.js`         | Engine and effect audio                                                      |
 | `public/js/controller.js`    | Phone controls and feedback                                                  |
-
-The car model and HDR environments are served from `public/assets`. The car falls back to a procedural model if its glTF file fails to load. Postprocessing runs separately for each player using shared viewport-sized buffers, keeping bloom and nitro blur inside that player's view. Actual frame rate depends on the laptop GPU and display resolution; **B** disables postprocessing on slower devices.
-
-Sunset lighting uses `venice_sunset_1k.hdr`, loaded with `RGBELoader` and filtered with PMREM for `scene.environment`. A matching procedural sunset sky keeps the HDRI's photographed buildings out of the backdrop. A warm directional sun matches the HDRI's 3.3° elevation beyond the treeline. Its faint `DirectionalLightHelper` appears in the lobby overview; adjust `sun.position` and `sun.target` in `buildTrack` to reposition it. Procedural environment lighting remains available if the HDRI cannot load.
