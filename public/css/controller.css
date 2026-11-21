@@ -174,7 +174,7 @@ button:not(.drive):active {
   position: absolute;
   inset: 62px 20px 43px;
   display: grid;
-  grid-template-columns: 1fr 1.75fr 1fr;
+  grid-template-columns: 1.1fr 1.75fr 1.1fr;
   gap: clamp(10px, 2.5vw, 24px);
 }
 .drive {
@@ -412,7 +412,7 @@ button:not(.drive):active {
     max(48px, calc(env(safe-area-inset-bottom) + 30px))
     max(22px, env(safe-area-inset-left));
   grid-template-columns:
-    repeat(2, clamp(54px, 11vw, 88px)) minmax(12px, 1fr)
+    repeat(2, clamp(58px, 12vw, 96px)) minmax(12px, 1fr)
     repeat(2, clamp(60px, 13vw, 104px));
   gap: clamp(8px, 1.8vw, 18px);
   align-items: end;
